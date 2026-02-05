@@ -3,7 +3,7 @@ from types import TracebackType
 
 
 class UnitOfWork(ABC):
-    """Abstract unit of work for transaction management."""
+    """Output port for transaction management."""
 
     @abstractmethod
     async def __aenter__(self) -> "UnitOfWork":

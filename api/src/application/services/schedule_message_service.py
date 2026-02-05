@@ -1,14 +1,14 @@
 from uuid import UUID
 
 from ...domain.entities import Message
-from ...domain.repositories import MessageRepository
 from ...domain.value_objects import ChannelType, MessageContent
 from ..dtos import CreateMessageDTO
-from ..interfaces import EventPublisher, UnitOfWork
+from ..ports.inbound import ScheduleMessageUseCase
+from ..ports.outbound import EventPublisher, MessageRepository, UnitOfWork
 
 
-class ScheduleMessageCommand:
-    """Use case for scheduling a message for delivery."""
+class ScheduleMessageService(ScheduleMessageUseCase):
+    """Service implementing the schedule message use case."""
 
     def __init__(
         self,

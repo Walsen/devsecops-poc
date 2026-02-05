@@ -2,11 +2,11 @@ from types import TracebackType
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from ...application.interfaces import UnitOfWork
+from ....application.ports.outbound import UnitOfWork
 
 
 class SqlAlchemyUnitOfWork(UnitOfWork):
-    """SQLAlchemy implementation of Unit of Work."""
+    """SQLAlchemy adapter implementing UnitOfWork port."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

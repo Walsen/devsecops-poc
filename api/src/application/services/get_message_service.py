@@ -1,11 +1,12 @@
 from uuid import UUID
 
-from ...domain.repositories import MessageRepository
 from ..dtos import ChannelDeliveryDTO, MessageResponseDTO
+from ..ports.inbound import GetMessageUseCase
+from ..ports.outbound import MessageRepository
 
 
-class GetMessageQuery:
-    """Query for retrieving message details."""
+class GetMessageService(GetMessageUseCase):
+    """Service implementing the get message use case."""
 
     def __init__(self, repository: MessageRepository) -> None:
         self._repository = repository

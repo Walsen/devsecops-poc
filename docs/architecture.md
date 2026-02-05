@@ -1,288 +1,364 @@
-# Architecture & Enterprise Patterns
+# Architecture: Hexagonal (Ports & Adapters)
 
 ## Overview
 
-This document describes the architectural patterns and clean code principles used in the Omnichannel Publisher platform.
+The Omnichannel Publisher follows Hexagonal Architecture (also known as Ports & Adapters), which isolates the core business logic from external concerns like databases, APIs, and message queues.
 
-## Architecture Pattern: Clean Architecture + CQRS-lite
+## Hexagonal Architecture Diagram
 
+```mermaid
+graph TB
+    subgraph Driving["Driving Side (Primary Adapters)"]
+        REST["FastAPI REST<br/>Controller"]
+        KINESIS_IN["Kinesis<br/>Consumer"]
+    end
+
+    subgraph Ports_In["Inbound Ports (Use Cases)"]
+        SCHEDULE["ScheduleMessage<br/>UseCase"]
+        GET["GetMessage<br/>UseCase"]
+        PROCESS["ProcessMessage<br/>UseCase"]
+    end
+
+    subgraph Core["Domain Core"]
+        ENTITIES["Entities<br/>Message, ChannelDelivery"]
+        VO["Value Objects<br/>ChannelType, MessageContent"]
+        SERVICES["Domain Services"]
+    end
+
+    subgraph Ports_Out["Outbound Ports"]
+        REPO["MessageRepository"]
+        EVENTS["EventPublisher"]
+        GATEWAY["ChannelGateway"]
+        UOW["UnitOfWork"]
+    end
+
+    subgraph Driven["Driven Side (Secondary Adapters)"]
+        POSTGRES["PostgreSQL<br/>Repository"]
+        KINESIS_OUT["Kinesis<br/>Publisher"]
+        WHATSAPP["WhatsApp<br/>Gateway"]
+        FACEBOOK["Facebook<br/>Gateway"]
+        INSTAGRAM["Instagram<br/>Gateway"]
+        EMAIL["SES Email<br/>Gateway"]
+        SMS["SNS SMS<br/>Gateway"]
+    end
+
+    REST --> SCHEDULE
+    REST --> GET
+    KINESIS_IN --> PROCESS
+
+    SCHEDULE --> Core
+    GET --> Core
+    PROCESS --> Core
+
+    Core --> REPO
+    Core --> EVENTS
+    Core --> GATEWAY
+    Core --> UOW
+
+    REPO -.-> POSTGRES
+    EVENTS -.-> KINESIS_OUT
+    GATEWAY -.-> WHATSAPP
+    GATEWAY -.-> FACEBOOK
+    GATEWAY -.-> INSTAGRAM
+    GATEWAY -.-> EMAIL
+    GATEWAY -.-> SMS
+    UOW -.-> POSTGRES
+
+    style Core fill:#e1f5fe
+    style Ports_In fill:#fff3e0
+    style Ports_Out fill:#fff3e0
+    style Driving fill:#e8f5e9
+    style Driven fill:#fce4ec
 ```
-┌─────────────────────────────────────────────────────────┐
-│                    Presentation Layer                    │
-│              (FastAPI routes, DTOs, OpenAPI)            │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                   Application Layer                      │
-│         (Use Cases, Commands, Queries, DTOs)            │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                     Domain Layer                         │
-│      (Entities, Value Objects, Domain Services)         │
-└─────────────────────────┬───────────────────────────────┘
-                          │
-┌─────────────────────────▼───────────────────────────────┐
-│                 Infrastructure Layer                     │
-│    (Repositories, External APIs, DB, Message Queue)     │
-└─────────────────────────────────────────────────────────┘
+
+## Layer Responsibilities
+
+### Domain Core (Center)
+The heart of the application containing pure business logic with zero external dependencies.
+
+```mermaid
+classDiagram
+    class Message {
+        +UUID id
+        +MessageContent content
+        +List~ChannelType~ channels
+        +datetime scheduled_at
+        +MessageStatus status
+        +schedule()
+        +mark_processing()
+        +mark_channel_delivered()
+        +mark_channel_failed()
+    }
+
+    class MessageContent {
+        +str text
+        +str media_url
+    }
+
+    class ChannelType {
+        <<enumeration>>
+        WHATSAPP
+        FACEBOOK
+        INSTAGRAM
+        EMAIL
+        SMS
+    }
+
+    class MessageStatus {
+        <<enumeration>>
+        DRAFT
+        SCHEDULED
+        PROCESSING
+        DELIVERED
+        FAILED
+    }
+
+    Message --> MessageContent
+    Message --> ChannelType
+    Message --> MessageStatus
 ```
 
-### Layer Responsibilities
+### Inbound Ports (Use Cases)
+Abstract interfaces defining what the application can do.
 
-#### Presentation Layer
-- HTTP request/response handling
-- Input validation and serialization
-- OpenAPI documentation
-- Authentication/authorization middleware
-- No business logic
+```mermaid
+classDiagram
+    class ScheduleMessageUseCase {
+        <<interface>>
+        +execute(dto: CreateMessageDTO) UUID
+    }
 
-#### Application Layer
-- Use case orchestration
-- Transaction boundaries
-- DTO transformations
-- Coordinates domain objects and infrastructure
+    class GetMessageUseCase {
+        <<interface>>
+        +execute(message_id: UUID) MessageResponseDTO
+    }
 
-#### Domain Layer
-- Core business logic
-- Entities and aggregates
-- Value objects with validation
-- Domain events
-- Repository interfaces (ports)
-- Zero external dependencies
+    class ScheduleMessageService {
+        -MessageRepository repository
+        -EventPublisher publisher
+        -UnitOfWork uow
+        +execute(dto: CreateMessageDTO) UUID
+    }
 
-#### Infrastructure Layer
-- Database implementations
-- External API clients (Meta, AWS services)
-- Message queue producers/consumers
-- Caching implementations
+    class GetMessageService {
+        -MessageRepository repository
+        +execute(message_id: UUID) MessageResponseDTO
+    }
 
-## Key Patterns
+    ScheduleMessageUseCase <|.. ScheduleMessageService
+    GetMessageUseCase <|.. GetMessageService
+```
 
-| Pattern | Purpose | Example |
-|---------|---------|---------|
-| Repository | Abstract data access | `MessageRepository` interface, `PostgresMessageRepository` impl |
-| Unit of Work | Transaction management | Wrap multiple repo operations in single transaction |
-| Use Cases | Single responsibility business logic | `ScheduleMessageUseCase`, `PublishToChannelUseCase` |
-| Domain Events | Decouple side effects | `MessageScheduled` → triggers Kinesis publish |
-| Value Objects | Immutable, validated types | `ChannelType`, `MessageContent`, `RecipientId` |
-| DTOs | Layer boundary contracts | `CreateMessageRequest`, `MessageResponse` |
-| Dependency Injection | Testability, loose coupling | Inject repos/services into use cases |
+### Outbound Ports
+Abstract interfaces for external dependencies.
+
+```mermaid
+classDiagram
+    class MessageRepository {
+        <<interface>>
+        +save(message: Message)
+        +get_by_id(id: UUID) Message
+        +get_scheduled_before(before: datetime) List~Message~
+    }
+
+    class EventPublisher {
+        <<interface>>
+        +publish(event_type: str, payload: dict)
+    }
+
+    class ChannelGateway {
+        <<interface>>
+        +send(recipient: str, content: str, media_url: str) DeliveryResult
+    }
+
+    class UnitOfWork {
+        <<interface>>
+        +commit()
+        +rollback()
+    }
+```
+
+### Adapters
+Concrete implementations of ports.
+
+```mermaid
+classDiagram
+    class MessageRepository {
+        <<interface>>
+    }
+
+    class PostgresMessageRepository {
+        -AsyncSession session
+        +save(message: Message)
+        +get_by_id(id: UUID) Message
+    }
+
+    class EventPublisher {
+        <<interface>>
+    }
+
+    class KinesisEventPublisher {
+        -str stream_name
+        -str region
+        +publish(event_type: str, payload: dict)
+    }
+
+    class ChannelGateway {
+        <<interface>>
+    }
+
+    class WhatsAppGateway {
+        -str access_token
+        -str phone_number_id
+        +send(recipient: str, content: str) DeliveryResult
+    }
+
+    class FacebookGateway {
+        -str access_token
+        -str page_id
+        +send(recipient: str, content: str) DeliveryResult
+    }
+
+    MessageRepository <|.. PostgresMessageRepository
+    EventPublisher <|.. KinesisEventPublisher
+    ChannelGateway <|.. WhatsAppGateway
+    ChannelGateway <|.. FacebookGateway
+```
 
 ## Folder Structure
 
 ```
-api/
-├── src/
-│   ├── domain/                 # Pure business logic, no dependencies
-│   │   ├── entities/
-│   │   │   ├── message.py      # Message aggregate root
-│   │   │   └── channel.py
-│   │   ├── value_objects/
-│   │   │   ├── channel_type.py # Enum + validation
-│   │   │   └── content.py
-│   │   ├── events/
-│   │   │   └── message_events.py
-│   │   ├── repositories/       # Abstract interfaces only
-│   │   │   └── message_repository.py
-│   │   └── services/           # Domain services
-│   │       └── scheduling_service.py
-│   │
-│   ├── application/            # Orchestration, use cases
-│   │   ├── commands/
-│   │   │   └── schedule_message.py
-│   │   ├── queries/
-│   │   │   └── get_message_status.py
-│   │   ├── dtos/
-│   │   │   └── message_dto.py
-│   │   └── interfaces/         # Port interfaces
-│   │       └── channel_gateway.py
-│   │
-│   ├── infrastructure/         # Concrete implementations
-│   │   ├── persistence/
-│   │   │   ├── postgres/
-│   │   │   │   ├── models.py   # SQLAlchemy models
-│   │   │   │   └── message_repository.py
-│   │   │   └── unit_of_work.py
-│   │   ├── messaging/
-│   │   │   └── kinesis_publisher.py
-│   │   └── external/
-│   │       ├── meta_gateway.py # Facebook/Instagram/WhatsApp
-│   │       └── ses_gateway.py
-│   │
-│   └── presentation/           # FastAPI layer
-│       ├── api/
-│       │   ├── v1/
-│       │   │   ├── messages.py
-│       │   │   └── channels.py
-│       │   └── dependencies.py # DI container
-│       └── middleware/
-│           └── error_handler.py
+api/src/
+├── domain/                          # Domain Core
+│   ├── entities/
+│   │   └── message.py               # Message aggregate root
+│   └── value_objects/
+│       ├── channel_type.py          # ChannelType enum
+│       └── content.py               # MessageContent value object
 │
-├── tests/
-│   ├── unit/                   # Domain + application tests
-│   ├── integration/            # Repository + external API tests
-│   └── e2e/                    # Full API tests
+├── application/                     # Application Layer
+│   ├── ports/
+│   │   ├── inbound/                 # Use case interfaces
+│   │   │   ├── schedule_message.py
+│   │   │   └── get_message.py
+│   │   └── outbound/                # Repository/service interfaces
+│   │       ├── message_repository.py
+│   │       ├── event_publisher.py
+│   │       └── unit_of_work.py
+│   ├── services/                    # Use case implementations
+│   │   ├── schedule_message_service.py
+│   │   └── get_message_service.py
+│   └── dtos/                        # Data transfer objects
+│       └── message_dto.py
 │
-└── pyproject.toml
+├── infrastructure/                  # Infrastructure Layer
+│   ├── adapters/
+│   │   ├── persistence/             # Database adapters
+│   │   │   ├── postgres_message_repository.py
+│   │   │   └── sqlalchemy_unit_of_work.py
+│   │   └── messaging/               # Message queue adapters
+│   │       └── kinesis_event_publisher.py
+│   └── persistence/
+│       ├── database.py              # Database connection
+│       └── models.py                # SQLAlchemy models
+│
+└── presentation/                    # Presentation Layer
+    └── api/
+        ├── dependencies.py          # Dependency injection
+        └── v1/
+            ├── health.py
+            └── messages.py          # REST endpoints
 ```
 
-## Code Examples
+## Request Flow
 
-### Domain Entity
+```mermaid
+sequenceDiagram
+    participant Client
+    participant FastAPI as FastAPI Controller
+    participant UseCase as ScheduleMessageService
+    participant Domain as Message Entity
+    participant Repo as PostgresRepository
+    participant Publisher as KinesisPublisher
+    participant Worker as Worker Service
 
-```python
-# domain/entities/message.py
-from dataclasses import dataclass
-from datetime import datetime
+    Client->>FastAPI: POST /api/v1/messages
+    FastAPI->>UseCase: execute(CreateMessageDTO)
+    UseCase->>Domain: Message.create()
+    Domain-->>UseCase: message
+    UseCase->>Domain: message.schedule()
+    UseCase->>Repo: save(message)
+    Repo-->>UseCase: ok
+    UseCase->>Publisher: publish("message.scheduled", payload)
+    Publisher-->>UseCase: ok
+    UseCase-->>FastAPI: message_id
+    FastAPI-->>Client: {"id": "...", "status": "scheduled"}
 
-@dataclass
-class Message:
-    id: MessageId
-    content: MessageContent
-    channels: list[ChannelType]
-    scheduled_at: datetime
-    status: MessageStatus
-    
-    def schedule(self) -> list[DomainEvent]:
-        """Schedule the message for delivery."""
-        self.status = MessageStatus.SCHEDULED
-        return [MessageScheduled(self.id, self.scheduled_at)]
-    
-    def mark_delivered(self, channel: ChannelType) -> list[DomainEvent]:
-        """Mark delivery complete for a channel."""
-        # Domain logic here
-        return [MessageDelivered(self.id, channel)]
+    Note over Publisher,Worker: Async Processing
+    Publisher->>Worker: Kinesis Event
+    Worker->>Worker: Deliver to channels
 ```
 
-### Repository Interface (Port)
+## Benefits of Hexagonal Architecture
 
-```python
-# domain/repositories/message_repository.py
-from typing import Protocol
+| Benefit | Description |
+|---------|-------------|
+| **Testability** | Domain and use cases can be tested without infrastructure |
+| **Flexibility** | Swap adapters without changing business logic |
+| **Maintainability** | Clear boundaries make code easier to understand |
+| **Independence** | Domain doesn't depend on frameworks or databases |
+| **Parallel Development** | Teams can work on different adapters independently |
 
-class MessageRepository(Protocol):
-    """Abstract interface for message persistence."""
-    
-    async def save(self, message: Message) -> None: ...
-    async def get_by_id(self, id: MessageId) -> Message | None: ...
-    async def get_pending(self, before: datetime) -> list[Message]: ...
+## Dependency Rule
+
+```mermaid
+graph LR
+    A[Presentation] --> B[Application]
+    B --> C[Domain]
+    D[Infrastructure] --> B
+
+    style C fill:#e1f5fe
+    style B fill:#fff3e0
 ```
 
-### Use Case (Command)
-
-```python
-# application/commands/schedule_message.py
-from dataclasses import dataclass
-
-@dataclass
-class ScheduleMessageDTO:
-    content: str
-    channels: list[str]
-    scheduled_at: datetime
-    recipient_id: str
-
-class ScheduleMessageCommand:
-    """Use case for scheduling a message."""
-    
-    def __init__(
-        self,
-        repo: MessageRepository,
-        event_bus: EventBus,
-        unit_of_work: UnitOfWork,
-    ):
-        self._repo = repo
-        self._event_bus = event_bus
-        self._uow = unit_of_work
-    
-    async def execute(self, dto: ScheduleMessageDTO) -> MessageId:
-        # Create domain entity
-        message = Message.create(
-            content=MessageContent(dto.content),
-            channels=[ChannelType(c) for c in dto.channels],
-            scheduled_at=dto.scheduled_at,
-        )
-        
-        # Execute domain logic
-        events = message.schedule()
-        
-        # Persist within transaction
-        async with self._uow:
-            await self._repo.save(message)
-            await self._uow.commit()
-        
-        # Publish domain events (outside transaction)
-        await self._event_bus.publish(events)
-        
-        return message.id
-```
-
-### Infrastructure Implementation
-
-```python
-# infrastructure/persistence/postgres/message_repository.py
-from sqlalchemy.ext.asyncio import AsyncSession
-
-class PostgresMessageRepository:
-    """Concrete implementation of MessageRepository for PostgreSQL."""
-    
-    def __init__(self, session: AsyncSession):
-        self._session = session
-    
-    async def save(self, message: Message) -> None:
-        model = MessageModel.from_entity(message)
-        self._session.add(model)
-        await self._session.flush()
-    
-    async def get_by_id(self, id: MessageId) -> Message | None:
-        result = await self._session.get(MessageModel, str(id))
-        return result.to_entity() if result else None
-```
-
-### Presentation Layer
-
-```python
-# presentation/api/v1/messages.py
-from fastapi import APIRouter, Depends
-
-router = APIRouter(prefix="/messages", tags=["messages"])
-
-@router.post("/", response_model=MessageResponse, status_code=201)
-async def schedule_message(
-    request: CreateMessageRequest,
-    command: ScheduleMessageCommand = Depends(get_schedule_command),
-) -> MessageResponse:
-    """Schedule a message for delivery."""
-    message_id = await command.execute(
-        ScheduleMessageDTO(
-            content=request.content,
-            channels=request.channels,
-            scheduled_at=request.scheduled_at,
-            recipient_id=request.recipient_id,
-        )
-    )
-    return MessageResponse(id=str(message_id), status="scheduled")
-```
-
-## Benefits
-
-- **Testability**: Domain logic is testable without DB/HTTP dependencies
-- **Flexibility**: Easy to swap implementations (Postgres → DynamoDB, Kinesis → SQS)
-- **Maintainability**: Clear boundaries make onboarding easier
-- **Explicit Use Cases**: Business operations are documented in code
-- **Separation of Concerns**: Each layer has a single responsibility
+Dependencies always point inward:
+- **Presentation** depends on **Application**
+- **Application** depends on **Domain**
+- **Infrastructure** depends on **Application** (implements ports)
+- **Domain** depends on nothing
 
 ## Testing Strategy
 
+```mermaid
+graph TB
+    subgraph Unit["Unit Tests"]
+        DOMAIN_TEST["Domain Tests<br/>(No mocks needed)"]
+        SERVICE_TEST["Service Tests<br/>(Mock ports)"]
+    end
+
+    subgraph Integration["Integration Tests"]
+        REPO_TEST["Repository Tests<br/>(Real DB)"]
+        ADAPTER_TEST["Adapter Tests<br/>(Real services)"]
+    end
+
+    subgraph E2E["End-to-End Tests"]
+        API_TEST["API Tests<br/>(Full stack)"]
+    end
+
+    DOMAIN_TEST --> SERVICE_TEST
+    SERVICE_TEST --> REPO_TEST
+    REPO_TEST --> API_TEST
+```
+
 | Layer | Test Type | Dependencies |
 |-------|-----------|--------------|
-| Domain | Unit tests | None (pure Python) |
-| Application | Unit tests | Mocked repositories |
-| Infrastructure | Integration tests | Real DB/services |
-| Presentation | E2E tests | Full application |
+| Domain | Unit | None |
+| Services | Unit | Mocked ports |
+| Adapters | Integration | Real DB/services |
+| API | E2E | Full application |
 
 ## References
 
+- [Hexagonal Architecture by Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/)
+- [Ports and Adapters Pattern](https://herbertograca.com/2017/09/14/ports-adapters-architecture/)
 - [Clean Architecture by Robert C. Martin](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
-- [Domain-Driven Design by Eric Evans](https://www.domainlanguage.com/ddd/)
-- [CQRS Pattern](https://martinfowler.com/bliki/CQRS.html)

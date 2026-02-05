@@ -3,11 +3,11 @@ from typing import Any
 
 from aiobotocore.session import get_session
 
-from ...application.interfaces import EventPublisher
+from ....application.ports.outbound import EventPublisher
 
 
 class KinesisEventPublisher(EventPublisher):
-    """Kinesis implementation of EventPublisher."""
+    """Kinesis adapter implementing EventPublisher port."""
 
     def __init__(self, stream_name: str, region: str = "us-east-1") -> None:
         self._stream_name = stream_name

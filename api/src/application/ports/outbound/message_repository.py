@@ -2,11 +2,11 @@ from abc import ABC, abstractmethod
 from datetime import datetime
 from uuid import UUID
 
-from ..entities import Message
+from ....domain.entities import Message
 
 
 class MessageRepository(ABC):
-    """Abstract repository interface for Message persistence."""
+    """Output port for message persistence."""
 
     @abstractmethod
     async def save(self, message: Message) -> None:

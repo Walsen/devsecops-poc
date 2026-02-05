@@ -2,10 +2,9 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from ....application.commands import ScheduleMessageCommand
 from ....application.dtos import CreateMessageDTO, MessageResponseDTO
-from ....application.queries import GetMessageQuery
-from ..dependencies import get_message_query, get_schedule_command
+from ....application.ports.inbound import GetMessageUseCase, ScheduleMessageUseCase
+from ..dependencies import get_message_use_case, get_schedule_message_use_case
 
 router = APIRouter(prefix="/messages", tags=["messages"])
 
@@ -19,10 +18,10 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 )
 async def schedule_message(
     request: CreateMessageDTO,
-    command: ScheduleMessageCommand = Depends(get_schedule_command),
+    use_case: ScheduleMessageUseCase = Depends(get_schedule_message_use_case),
 ) -> dict:
     """Schedule a message for async delivery."""
-    message_id = await command.execute(request)
+    message_id = await use_case.execute(request)
     return {"id": str(message_id), "status": "scheduled"}
 
 
@@ -34,10 +33,10 @@ async def schedule_message(
 )
 async def get_message(
     message_id: UUID,
-    query: GetMessageQuery = Depends(get_message_query),
+    use_case: GetMessageUseCase = Depends(get_message_use_case),
 ) -> MessageResponseDTO:
     """Get message by ID."""
-    message = await query.execute(message_id)
+    message = await use_case.execute(message_id)
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

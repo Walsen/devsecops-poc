@@ -5,13 +5,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from ...domain.entities import Message, MessageStatus
-from ...domain.repositories import MessageRepository
-from .models import MessageModel
+from ....application.ports.outbound import MessageRepository
+from ....domain.entities import Message, MessageStatus
+from ...persistence.models import MessageModel
 
 
 class PostgresMessageRepository(MessageRepository):
-    """PostgreSQL implementation of MessageRepository."""
+    """PostgreSQL adapter implementing MessageRepository port."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -21,20 +21,17 @@ class PostgresMessageRepository(MessageRepository):
         existing = await self._session.get(MessageModel, message.id)
         
         if existing:
-            # Update existing
             existing.content_text = message.content.text
             existing.content_media_url = message.content.media_url
             existing.scheduled_at = message.scheduled_at
             existing.status = message.status.value
             existing.updated_at = message.updated_at
-            # Update deliveries
             for i, delivery in enumerate(message.deliveries):
                 if i < len(existing.deliveries):
                     existing.deliveries[i].status = delivery.status.value
                     existing.deliveries[i].delivered_at = delivery.delivered_at
                     existing.deliveries[i].error = delivery.error
         else:
-            # Insert new
             model = MessageModel.from_entity(message)
             self._session.add(model)
 

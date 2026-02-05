@@ -2,13 +2,15 @@ from typing import AsyncGenerator
 
 from fastapi import Depends
 
-from ...application.commands import ScheduleMessageCommand
-from ...application.queries import GetMessageQuery
+from ...application.ports.inbound import GetMessageUseCase, ScheduleMessageUseCase
+from ...application.services import GetMessageService, ScheduleMessageService
 from ...config import settings
-from ...infrastructure.messaging.kinesis_publisher import KinesisEventPublisher
+from ...infrastructure.adapters import (
+    KinesisEventPublisher,
+    PostgresMessageRepository,
+    SqlAlchemyUnitOfWork,
+)
 from ...infrastructure.persistence.database import Database
-from ...infrastructure.persistence.message_repository import PostgresMessageRepository
-from ...infrastructure.persistence.unit_of_work import SqlAlchemyUnitOfWork
 
 # Singleton database instance
 _database: Database | None = None
@@ -37,15 +39,17 @@ def get_event_publisher() -> KinesisEventPublisher:
     )
 
 
-async def get_schedule_command(
+async def get_schedule_message_use_case(
     session=Depends(get_session),
     publisher: KinesisEventPublisher = Depends(get_event_publisher),
-) -> ScheduleMessageCommand:
+) -> ScheduleMessageUseCase:
+    """Dependency injection for ScheduleMessageUseCase."""
     repository = PostgresMessageRepository(session)
     unit_of_work = SqlAlchemyUnitOfWork(session)
-    return ScheduleMessageCommand(repository, publisher, unit_of_work)
+    return ScheduleMessageService(repository, publisher, unit_of_work)
 
 
-async def get_message_query(session=Depends(get_session)) -> GetMessageQuery:
+async def get_message_use_case(session=Depends(get_session)) -> GetMessageUseCase:
+    """Dependency injection for GetMessageUseCase."""
     repository = PostgresMessageRepository(session)
-    return GetMessageQuery(repository)
+    return GetMessageService(repository)

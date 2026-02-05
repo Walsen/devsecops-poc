@@ -3,7 +3,7 @@ from typing import Any
 
 
 class EventPublisher(ABC):
-    """Abstract interface for publishing domain events."""
+    """Output port for publishing domain events."""
 
     @abstractmethod
     async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
