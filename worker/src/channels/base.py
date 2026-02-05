@@ -1,24 +1,14 @@
-from abc import ABC, abstractmethod
-from dataclasses import dataclass
+"""
+Channel gateway base classes.
 
+Re-exports from domain ports for backward compatibility.
+Channel implementations should inherit from ChannelGateway and return DeliveryResult.
+"""
 
-@dataclass
-class DeliveryResult:
-    """Result of a channel delivery attempt."""
-    success: bool
-    external_id: str | None = None
-    error: str | None = None
+from ..domain.ports.channel_gateway import (
+    ChannelGateway,
+    ChannelType,
+    DeliveryResult,
+)
 
-
-class ChannelGateway(ABC):
-    """Abstract base for channel delivery gateways."""
-
-    @abstractmethod
-    async def send(
-        self,
-        recipient_id: str,
-        content: str,
-        media_url: str | None = None,
-    ) -> DeliveryResult:
-        """Send a message through this channel."""
-        ...
+__all__ = ["ChannelGateway", "ChannelType", "DeliveryResult"]

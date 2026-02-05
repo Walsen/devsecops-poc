@@ -18,22 +18,36 @@
       "disabled": false,
       "autoApprove": []
     },
-    "cloudwatch-logs": {
+    "cloudwatch": {
       "command": "uvx",
-      "args": ["awslabs.cloudwatch-logs-mcp-server@latest"],
+      "args": ["awslabs.cloudwatch-mcp-server@latest"],
       "env": {
-        "FASTMCP_LOG_LEVEL": "ERROR"
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_PROFILE": "awscbba",
+        "AWS_REGION": "us-east-1"
       },
       "disabled": false,
       "autoApprove": []
     },
-    "cost-analysis": {
+    "aws-pricing": {
       "command": "uvx",
-      "args": ["awslabs.cost-analysis-mcp-server@latest"],
+      "args": ["awslabs.aws-pricing-mcp-server@latest"],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR",
+        "AWS_PROFILE": "awscbba",
+        "AWS_REGION": "us-east-1"
+      },
+      "disabled": false,
+      "autoApprove": []
+    },
+    "aws-diagram": {
+      "command": "uvx",
+      "args": ["awslabs.aws-diagram-mcp-server@latest"],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
       "disabled": false,
+      "timeout": 90,
       "autoApprove": []
     }
   }

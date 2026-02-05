@@ -1,16 +1,36 @@
 from aws_cdk import (
-    Stack,
     Duration,
-    aws_ec2 as ec2,
-    aws_guardduty as guardduty,
-    aws_securityhub as securityhub,
-    aws_events as events,
-    aws_events_targets as targets,
-    aws_lambda as lambda_,
-    aws_iam as iam,
-    aws_wafv2 as wafv2,
+    Stack,
+)
+from aws_cdk import (
     aws_cloudtrail as cloudtrail,
+)
+from aws_cdk import (
+    aws_ec2 as ec2,
+)
+from aws_cdk import (
+    aws_events as events,
+)
+from aws_cdk import (
+    aws_events_targets as targets,
+)
+from aws_cdk import (
+    aws_guardduty as guardduty,
+)
+from aws_cdk import (
+    aws_iam as iam,
+)
+from aws_cdk import (
+    aws_lambda as lambda_,
+)
+from aws_cdk import (
     aws_logs as logs,
+)
+from aws_cdk import (
+    aws_securityhub as securityhub,
+)
+from aws_cdk import (
+    aws_wafv2 as wafv2,
 )
 from constructs import Construct
 
@@ -46,11 +66,7 @@ class MonitoringStack(Stack):
         )
 
         # Lambda to auto-block malicious IPs from GuardDuty findings
-        block_ip_lambda = lambda_.Function(
-            self, "BlockIpLambda",
-            runtime=lambda_.Runtime.PYTHON_3_11,
-            handler="index.handler",
-            code=lambda_.Code.from_inline("""
+        lambda_code = """
 import boto3
 import os
 
@@ -59,33 +75,36 @@ wafv2 = boto3.client('wafv2')
 def handler(event, context):
     detail = event.get('detail', {})
     finding_type = detail.get('type', '')
-    
+
     # Only process network-related findings
-    if not any(t in finding_type for t in ['UnauthorizedAccess', 'Recon', 'Trojan']):
+    threat_types = ['UnauthorizedAccess', 'Recon', 'Trojan']
+    if not any(t in finding_type for t in threat_types):
         return {'statusCode': 200, 'body': 'Skipped - not a network threat'}
-    
+
     # Extract attacker IP
     service = detail.get('service', {})
     action = service.get('action', {})
-    
+
     remote_ip = None
     if 'networkConnectionAction' in action:
-        remote_ip = action['networkConnectionAction'].get('remoteIpDetails', {}).get('ipAddressV4')
+        conn = action['networkConnectionAction']
+        remote_ip = conn.get('remoteIpDetails', {}).get('ipAddressV4')
     elif 'portProbeAction' in action:
-        remote_ip = action['portProbeAction'].get('portProbeDetails', [{}])[0].get('remoteIpDetails', {}).get('ipAddressV4')
-    
+        probe = action['portProbeAction'].get('portProbeDetails', [{}])[0]
+        remote_ip = probe.get('remoteIpDetails', {}).get('ipAddressV4')
+
     if not remote_ip:
         return {'statusCode': 200, 'body': 'No IP found'}
-    
+
     ip_set_name = os.environ['IP_SET_NAME']
     ip_set_id = os.environ['IP_SET_ID']
     ip_set_scope = os.environ['IP_SET_SCOPE']
-    
+
     # Get current IP set
     response = wafv2.get_ip_set(Name=ip_set_name, Scope=ip_set_scope, Id=ip_set_id)
     addresses = response['IPSet']['Addresses']
     lock_token = response['LockToken']
-    
+
     # Add new IP if not already blocked
     new_ip = f"{remote_ip}/32"
     if new_ip not in addresses:
@@ -98,9 +117,15 @@ def handler(event, context):
             LockToken=lock_token
         )
         print(f"Blocked IP: {remote_ip}")
-    
+
     return {'statusCode': 200, 'body': f'Processed IP: {remote_ip}'}
-"""),
+"""
+
+        block_ip_lambda = lambda_.Function(
+            self, "BlockIpLambda",
+            runtime=lambda_.Runtime.PYTHON_3_11,
+            handler="index.handler",
+            code=lambda_.Code.from_inline(lambda_code),
             environment={
                 "IP_SET_NAME": waf_ip_set.name,
                 "IP_SET_ID": waf_ip_set.attr_id,

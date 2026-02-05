@@ -1,69 +1,58 @@
-import asyncio
+"""
+Message processor for the worker service.
+
+This module handles incoming messages from Kinesis and delegates
+to the MessageDeliveryService for actual delivery.
+"""
+
 from uuid import UUID
 
 import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .channels import (
-    ChannelGateway,
-    EmailGateway,
-    FacebookGateway,
-    InstagramGateway,
-    SmsGateway,
-    WhatsAppGateway,
-)
+from .application.services import MessageDeliveryService
+from .infrastructure.adapters import DirectPublisher, AgentPublisher
 from .config import settings
 
 logger = structlog.get_logger()
 
 
 class MessageProcessor:
-    """Processes messages and delivers to channels."""
+    """
+    Processes messages from Kinesis and delivers to channels.
+    
+    Uses the MessageDeliveryService (application layer) which depends
+    on the SocialMediaPublisher port. The publisher implementation
+    (DirectPublisher or AgentPublisher) is selected based on config.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
-        self._gateways = self._init_gateways()
+        self._delivery_service = self._init_delivery_service()
 
-    def _init_gateways(self) -> dict[str, ChannelGateway]:
-        """Initialize channel gateways."""
-        gateways: dict[str, ChannelGateway] = {}
-
-        if settings.meta_access_token:
-            if settings.meta_phone_number_id:
-                gateways["whatsapp"] = WhatsAppGateway(
-                    settings.meta_access_token,
-                    settings.meta_phone_number_id,
-                )
-            if settings.meta_page_id:
-                gateways["facebook"] = FacebookGateway(
-                    settings.meta_access_token,
-                    settings.meta_page_id,
-                )
-            if settings.meta_instagram_account_id:
-                gateways["instagram"] = InstagramGateway(
-                    settings.meta_access_token,
-                    settings.meta_instagram_account_id,
-                )
-
-        if settings.ses_sender_email:
-            gateways["email"] = EmailGateway(
-                settings.ses_sender_email,
-                settings.aws_region,
-            )
-
-        gateways["sms"] = SmsGateway(
-            settings.sns_sender_id,
-            settings.aws_region,
-        )
-
-        return gateways
+    def _init_delivery_service(self) -> MessageDeliveryService:
+        """Initialize the delivery service with appropriate publisher."""
+        if settings.use_ai_agent:
+            logger.info("Using AI Agent publisher for intelligent content adaptation")
+            publisher = AgentPublisher()
+        else:
+            logger.info("Using Direct publisher for simple delivery")
+            publisher = DirectPublisher()
+        
+        return MessageDeliveryService(publisher)
 
     async def process_scheduled_message(
         self,
         message_id: str,
         channels: list[str],
     ) -> None:
-        """Process a scheduled message and deliver to all channels."""
+        """
+        Process a scheduled message and deliver to all channels.
+        
+        Args:
+            message_id: UUID of the message to process
+            channels: List of channel names to deliver to
+        """
         logger.info(
             "Processing message",
             message_id=message_id,
@@ -79,60 +68,56 @@ class MessageProcessor:
         # Mark as processing
         await self._update_status(message_id, "processing")
 
-        # Deliver to each channel concurrently
-        tasks = [
-            self._deliver_to_channel(message, channel)
-            for channel in channels
-            if channel in self._gateways
-        ]
-
-        results = await asyncio.gather(*tasks, return_exceptions=True)
-
-        # Log results
-        for channel, result in zip(channels, results):
-            if isinstance(result, Exception):
-                logger.error(
-                    "Channel delivery exception",
-                    channel=channel,
-                    error=str(result),
-                )
-
-    async def _deliver_to_channel(
-        self,
-        message: dict,
-        channel: str,
-    ) -> None:
-        """Deliver message to a specific channel."""
-        gateway = self._gateways.get(channel)
-        if not gateway:
-            logger.warning("No gateway for channel", channel=channel)
-            return
-
-        result = await gateway.send(
-            recipient_id=message["recipient_id"],
-            content=message["content"],
-            media_url=message.get("media_url"),
-        )
-
-        if result.success:
-            await self._mark_channel_delivered(
-                message["id"],
-                channel,
-                result.external_id,
+        try:
+            # Deliver using the application service
+            result = await self._delivery_service.deliver(
+                content=message["content"],
+                channels=channels,
+                media_url=message.get("media_url"),
+                metadata=message.get("metadata"),
             )
-        else:
-            await self._mark_channel_failed(
-                message["id"],
-                channel,
-                result.error or "Unknown error",
+
+            # Update channel delivery statuses based on results
+            for channel_type, channel_result in result.channel_results.items():
+                channel_name = channel_type.value
+                if channel_result.get("success"):
+                    await self._mark_channel_delivered(
+                        message_id,
+                        channel_name,
+                        channel_result.get("external_id"),
+                    )
+                else:
+                    await self._mark_channel_failed(
+                        message_id,
+                        channel_name,
+                        channel_result.get("error", "Unknown error"),
+                    )
+
+            # Update overall message status
+            success_count = sum(
+                1 for r in result.channel_results.values() 
+                if r.get("success")
             )
+            if success_count == len(channels):
+                await self._update_status(message_id, "delivered")
+            elif success_count > 0:
+                await self._update_status(message_id, "partial")
+            else:
+                await self._update_status(message_id, "failed")
+
+        except Exception as e:
+            logger.error(
+                "Message processing failed",
+                message_id=message_id,
+                error=str(e),
+            )
+            await self._update_status(message_id, "failed")
 
     async def _get_message(self, message_id: UUID) -> dict | None:
         """Fetch message from database."""
-        # Using raw SQL for simplicity - in production, use repository pattern
         result = await self._session.execute(
             """
-            SELECT id, content_text, content_media_url, recipient_id
+            SELECT id, content_text, content_media_url, recipient_id, metadata
             FROM messages WHERE id = :id
             """,
             {"id": str(message_id)},
@@ -144,6 +129,7 @@ class MessageProcessor:
                 "content": row[1],
                 "media_url": row[2],
                 "recipient_id": row[3],
+                "metadata": row[4] if len(row) > 4 else None,
             }
         return None
 
@@ -174,10 +160,10 @@ class MessageProcessor:
         await self._session.execute(
             """
             UPDATE channel_deliveries
-            SET status = 'delivered', delivered_at = NOW()
+            SET status = 'delivered', delivered_at = NOW(), external_id = :external_id
             WHERE message_id = :message_id AND channel = :channel
             """,
-            {"message_id": message_id, "channel": channel},
+            {"message_id": message_id, "channel": channel, "external_id": external_id},
         )
         await self._session.commit()
 

@@ -5,6 +5,7 @@ import aws_cdk as cdk
 from stacks.network_stack import NetworkStack
 from stacks.security_stack import SecurityStack
 from stacks.data_stack import DataStack
+from stacks.auth_stack import AuthStack
 from stacks.compute_stack import ComputeStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.edge_stack import EdgeStack
@@ -32,7 +33,11 @@ data_stack = DataStack(
     env=env,
     vpc=network_stack.vpc,
     kms_key=security_stack.kms_key,
+    service_security_group=network_stack.service_security_group,
 )
+
+# Authentication (Cognito User Pool)
+auth_stack = AuthStack(app, "AuthStack", env=env)
 
 # Compute layer (ECS Fargate, ALB, Cloud Map)
 compute_stack = ComputeStack(
@@ -41,8 +46,11 @@ compute_stack = ComputeStack(
     vpc=network_stack.vpc,
     kms_key=security_stack.kms_key,
     db_secret=data_stack.db_secret,
-    database=data_stack.database,
     event_stream=data_stack.event_stream,
+    service_security_group=network_stack.service_security_group,
+    alb_security_group=network_stack.alb_security_group,
+    user_pool=auth_stack.user_pool,
+    user_pool_client=auth_stack.user_pool_client,
 )
 
 # Edge layer (CloudFront, WAF) - must be us-east-1 for CloudFront WAF

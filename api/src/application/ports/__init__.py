@@ -1,5 +1,5 @@
-from .inbound import ScheduleMessageUseCase, GetMessageUseCase
-from .outbound import MessageRepository, EventPublisher, UnitOfWork
+from .inbound import GetMessageUseCase, ScheduleMessageUseCase
+from .outbound import EventPublisher, MessageRepository, UnitOfWork
 
 __all__ = [
     "ScheduleMessageUseCase",

@@ -1,7 +1,7 @@
 import structlog
 from aiobotocore.session import get_session
 
-from .base import ChannelGateway, DeliveryResult
+from .base import ChannelGateway, ChannelType, DeliveryResult
 
 logger = structlog.get_logger()
 
@@ -13,6 +13,10 @@ class SmsGateway(ChannelGateway):
         self._sender_id = sender_id
         self._region = region
         self._session = get_session()
+
+    @property
+    def channel_type(self) -> ChannelType:
+        return ChannelType.SMS
 
     async def send(
         self,

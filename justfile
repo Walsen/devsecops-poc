@@ -2,6 +2,24 @@
 default:
     @just --list
 
+# Setup
+# Install git hooks
+install-hooks:
+    @echo "Installing git hooks..."
+    @cp scripts/git-hooks/pre-push .git/hooks/pre-push
+    @chmod +x .git/hooks/pre-push
+    @echo "✓ Git hooks installed"
+
+# Uninstall git hooks
+uninstall-hooks:
+    @echo "Removing git hooks..."
+    @rm -f .git/hooks/pre-push
+    @echo "✓ Git hooks removed"
+
+# Run pre-push checks manually
+check:
+    @./scripts/git-hooks/pre-push
+
 # Development
 # Start development environment and tail logs
 dev: up logs
@@ -91,6 +109,24 @@ test-match pattern:
 lint:
     docker compose exec api ruff check src/
     docker compose exec api mypy src/
+
+# Run linters locally (without Docker)
+lint-local:
+    @echo "Linting API..."
+    uv run --directory api ruff check src/
+    @echo "Linting Worker..."
+    uv run --directory worker ruff check src/
+    @echo "Linting Scheduler..."
+    uv run --directory scheduler ruff check src/
+    @echo "Linting Infra..."
+    uv run --directory infra ruff check stacks/
+
+# Run tests locally (without Docker)
+test-local:
+    @echo "Testing API..."
+    uv run --directory api --extra dev pytest tests/ -v
+    @echo "Testing Worker..."
+    uv run --directory worker --extra dev pytest tests/ -v
 
 # LocalStack
 # View LocalStack logs

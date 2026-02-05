@@ -28,14 +28,14 @@ logger = structlog.get_logger()
 async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting application", service=settings.service_name)
-    
+
     # Initialize database
     db = get_database()
     if settings.debug:
         await db.create_tables()
-    
+
     yield
-    
+
     # Cleanup
     await db.close()
     logger.info("Application shutdown complete")
@@ -43,7 +43,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Omnichannel Publisher API",
-    description="Schedule and deliver messages across WhatsApp, Facebook, Instagram, Email, and SMS",
+    description="Schedule and deliver messages across multiple channels",
     version="0.1.0",
     lifespan=lifespan,
 )

@@ -25,12 +25,21 @@ class Settings(BaseSettings):
     meta_phone_number_id: str = ""  # WhatsApp
     meta_page_id: str = ""  # Facebook
     meta_instagram_account_id: str = ""
+    whatsapp_community_id: str = ""  # WhatsApp community group ID
+    
+    # LinkedIn API
+    linkedin_access_token: str = ""
+    linkedin_organization_id: str = ""
     
     # AWS SES (Email)
     ses_sender_email: str = ""
     
     # AWS SNS (SMS)
     sns_sender_id: str = ""
+    
+    # AI Agent
+    use_ai_agent: bool = False  # Enable AI agent for intelligent posting
+    bedrock_model_id: str = "anthropic.claude-sonnet-4-5-20250929-v1:0"
     
     @property
     def database_url(self) -> str:

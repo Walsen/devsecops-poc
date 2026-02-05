@@ -1,9 +1,15 @@
 from aws_cdk import (
-    Stack,
-    RemovalPolicy,
     CfnOutput,
+    RemovalPolicy,
+    Stack,
+)
+from aws_cdk import (
     aws_ec2 as ec2,
+)
+from aws_cdk import (
     aws_kms as kms,
+)
+from aws_cdk import (
     aws_wafv2 as wafv2,
 )
 from constructs import Construct

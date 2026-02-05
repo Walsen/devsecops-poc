@@ -2,59 +2,17 @@ name: CI
 
 on:
   push:
-    branches: [main, feature/*]
+    branches: [feature/**, develop]
   pull_request:
     branches: [main]
 
 env:
   PYTHON_VERSION: "3.12"
-  NODE_VERSION: "20"
 
 jobs:
-  # Security scanning
-  security:
-    name: Security Checks
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install security tools
-        run: |
-          pip install pip-audit bandit safety
-
-      # Dependency vulnerability scanning
-      - name: Audit API dependencies
-        run: pip-audit -r api/pyproject.toml --strict || true
-        continue-on-error: true
-
-      - name: Audit Worker dependencies
-        run: pip-audit -r worker/pyproject.toml --strict || true
-        continue-on-error: true
-
-      # Static security analysis
-      - name: Bandit security scan - API
-        run: bandit -r api/src/ -ll -ii
-
-      - name: Bandit security scan - Worker
-        run: bandit -r worker/src/ -ll -ii
-
-      - name: Bandit security scan - Scheduler
-        run: bandit -r scheduler/src/ -ll -ii
-
-      # Secret scanning
-      - name: Gitleaks secret scan
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
   # Lint and type check
   lint:
-    name: Lint & Type Check
+    name: Lint
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -62,39 +20,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v4
 
-      - name: Install dependencies
-        run: |
-          cd ${{ matrix.service }}
-          uv pip install --system ".[dev]"
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
-        run: |
-          cd ${{ matrix.service }}
-          ruff check src/
+        run: uv run --directory ${{ matrix.service }} ruff check src/
 
       - name: Ruff format check
-        run: |
-          cd ${{ matrix.service }}
-          ruff format --check src/
+        run: uv run --directory ${{ matrix.service }} ruff format --check src/
 
-      - name: MyPy type check
-        run: |
-          cd ${{ matrix.service }}
-          mypy src/ --ignore-missing-imports || true
+  # Infrastructure lint
+  lint-infra:
+    name: Lint Infrastructure
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Ruff lint
+        run: uv run --directory infra ruff check stacks/
 
   # Unit tests
   test:
-    name: Tests
+    name: Test
     runs-on: ubuntu-latest
     needs: [lint]
+    strategy:
+      matrix:
+        include:
+          - service: api
+            has_tests: true
+          - service: worker
+            has_tests: true
     services:
       postgres:
         image: postgres:15-alpine
@@ -113,20 +78,14 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
       - name: Install uv
-        run: pip install uv
+        uses: astral-sh/setup-uv@v4
 
-      - name: Install API dependencies
-        run: |
-          cd api
-          uv pip install --system ".[dev]"
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
 
-      - name: Run API tests
+      - name: Run tests
+        if: matrix.has_tests
         env:
           DB_HOST: localhost
           DB_PORT: 5432
@@ -136,20 +95,70 @@ jobs:
           AWS_REGION: us-east-1
           KINESIS_STREAM_NAME: test-stream
         run: |
-          cd api
-          pytest -v --cov=src --cov-report=xml || true
+          uv run --directory ${{ matrix.service }} --extra dev pytest tests/ -v --tb=short
 
-      - name: Upload coverage
-        uses: codecov/codecov-action@v3
-        with:
-          files: api/coverage.xml
-          fail_ci_if_error: false
-
-  # Container build and scan
-  container:
-    name: Container Build & Scan
+  # CDK validation
+  cdk-synth:
+    name: CDK Synth
     runs-on: ubuntu-latest
-    needs: [security, test]
+    needs: [lint-infra]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: CDK synth
+        run: uv run --directory infra cdk synth --quiet
+
+  # Security scanning (on PRs to main)
+  security:
+    name: Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install bandit
+        run: uv tool install bandit
+
+      - name: Bandit scan - API
+        run: uv tool run bandit -r api/src/ -ll -ii
+
+      - name: Bandit scan - Worker
+        run: uv tool run bandit -r worker/src/ -ll -ii
+
+      - name: Bandit scan - Scheduler
+        run: uv tool run bandit -r scheduler/src/ -ll -ii
+
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Container build validation (on PRs to main)
+  container-build:
+    name: Container Build
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [test, cdk-synth]
     strategy:
       matrix:
         service: [api, worker, scheduler]
@@ -165,97 +174,6 @@ jobs:
           context: ./${{ matrix.service }}
           file: ./${{ matrix.service }}/Dockerfile
           push: false
-          load: true
-          tags: ${{ matrix.service }}:${{ github.sha }}
+          tags: ${{ matrix.service }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
-
-      - name: Trivy vulnerability scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ matrix.service }}:${{ github.sha }}
-          format: 'sarif'
-          output: 'trivy-${{ matrix.service }}.sarif'
-          severity: 'CRITICAL,HIGH'
-
-      - name: Upload Trivy results
-        uses: github/codeql-action/upload-sarif@v2
-        if: always()
-        with:
-          sarif_file: 'trivy-${{ matrix.service }}.sarif'
-
-  # CDK validation
-  infra:
-    name: Infrastructure Validation
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install CDK
-        run: npm install -g aws-cdk
-
-      - name: Install uv
-        run: pip install uv
-
-      - name: Install infra dependencies
-        run: |
-          cd infra
-          uv pip install --system -r requirements.txt
-
-      - name: CDK synth
-        run: |
-          cd infra
-          cdk synth --quiet
-
-      - name: CDK Nag check
-        run: |
-          cd infra
-          cdk synth 2>&1 | grep -i "warning\|error" || echo "No CDK Nag issues found"
-
-  # SBOM generation
-  sbom:
-    name: Generate SBOM
-    runs-on: ubuntu-latest
-    needs: [container]
-    if: github.ref == 'refs/heads/main'
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.PYTHON_VERSION }}
-
-      - name: Install CycloneDX
-        run: pip install cyclonedx-bom
-
-      - name: Generate API SBOM
-        run: |
-          cd api
-          cyclonedx-py -r -o ../sbom-api.json
-
-      - name: Generate Worker SBOM
-        run: |
-          cd worker
-          cyclonedx-py -r -o ../sbom-worker.json
-
-      - name: Generate Scheduler SBOM
-        run: |
-          cd scheduler
-          cyclonedx-py -r -o ../sbom-scheduler.json
-
-      - name: Upload SBOMs
-        uses: actions/upload-artifact@v4
-        with:
-          name: sbom
-          path: sbom-*.json

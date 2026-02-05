@@ -1,15 +1,32 @@
 from aws_cdk import (
-    Stack,
     Duration,
+    Stack,
+)
+from aws_cdk import (
+    aws_cognito as cognito,
+)
+from aws_cdk import (
     aws_ec2 as ec2,
+)
+from aws_cdk import (
     aws_ecs as ecs,
+)
+from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
-    aws_servicediscovery as servicediscovery,
-    aws_kms as kms,
+)
+from aws_cdk import (
     aws_kinesis as kinesis,
-    aws_rds as rds,
-    aws_secretsmanager as secretsmanager,
+)
+from aws_cdk import (
+    aws_kms as kms,
+)
+from aws_cdk import (
     aws_logs as logs,
+)
+from aws_cdk import (
+    aws_secretsmanager as secretsmanager,
+)
+from aws_cdk import (
     aws_wafv2 as wafv2,
 )
 from constructs import Construct
@@ -23,52 +40,28 @@ class ComputeStack(Stack):
         vpc: ec2.Vpc,
         kms_key: kms.Key,
         db_secret: secretsmanager.Secret,
-        database: rds.DatabaseInstance,
         event_stream: kinesis.Stream,
+        service_security_group: ec2.SecurityGroup,
+        alb_security_group: ec2.SecurityGroup,
+        user_pool: cognito.UserPool,
+        user_pool_client: cognito.UserPoolClient,
         **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)
 
-        # Cloud Map namespace for service discovery
-        self.namespace = servicediscovery.PrivateDnsNamespace(
-            self, "Namespace",
-            name="secure-api.local",
-            vpc=vpc,
-        )
+        # Store reference to security groups (created in NetworkStack)
+        self.service_security_group = service_security_group
 
         # ECS Cluster
         self.cluster = ecs.Cluster(
             self, "Cluster",
             vpc=vpc,
             container_insights=True,
-            default_cloud_map_namespace=self.namespace,
         )
 
-        # Shared security group for inter-service communication
-        self.service_security_group = ec2.SecurityGroup(
-            self, "ServiceSecurityGroup",
-            vpc=vpc,
-            description="Security group for Fargate services (inter-service communication)",
-            allow_all_outbound=True,
-        )
-        # Allow services to communicate with each other
-        self.service_security_group.add_ingress_rule(
-            self.service_security_group, ec2.Port.tcp(8080), "Inter-service communication"
-        )
-
-        # ALB Security Group
-        alb_security_group = ec2.SecurityGroup(
-            self, "AlbSecurityGroup",
-            vpc=vpc,
-            description="Security group for ALB",
-            allow_all_outbound=True,
-        )
-        alb_security_group.add_ingress_rule(
-            ec2.Peer.any_ipv4(), ec2.Port.tcp(443), "HTTPS"
-        )
-        # Allow ALB to reach services
-        self.service_security_group.add_ingress_rule(
-            alb_security_group, ec2.Port.tcp(8080), "From ALB"
+        # Cloud Map namespace for service discovery
+        self.namespace = self.cluster.add_default_cloud_map_namespace(
+            name="secure-api.local",
         )
 
         # Application Load Balancer
@@ -88,9 +81,6 @@ class ComputeStack(Stack):
             web_acl_arn=web_acl.attr_arn,
         )
 
-        # Allow services to connect to RDS
-        database.connections.allow_from(self.service_security_group, ec2.Port.tcp(5432))
-
         # Shared environment variables for all services
         shared_environment = {
             "SERVICE_NAMESPACE": "secure-api.local",
@@ -98,6 +88,10 @@ class ComputeStack(Stack):
             "WORKER_SERVICE_HOST": "worker.secure-api.local",
             "SCHEDULER_SERVICE_HOST": "scheduler.secure-api.local",
             "KINESIS_STREAM_NAME": event_stream.stream_name,
+            "AUTH_ENABLED": "true",
+            "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
+            "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
+            "COGNITO_REGION": self.region,
         }
 
         # ============================================================
@@ -225,12 +219,12 @@ class ComputeStack(Stack):
 
         # ============================================================
         # ALB Listener - Only API service is exposed externally
+        # Dev: Using HTTP for simplicity. For production, use HTTPS with ACM certificate.
         # ============================================================
         listener = self.alb.add_listener(
-            "HttpsListener",
-            port=443,
-            protocol=elbv2.ApplicationProtocol.HTTPS,
-            certificates=[],  # Add ACM certificate ARN here
+            "HttpListener",
+            port=80,
+            protocol=elbv2.ApplicationProtocol.HTTP,
             open=True,
         )
 

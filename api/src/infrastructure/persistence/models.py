@@ -1,11 +1,11 @@
 from datetime import datetime
 from uuid import UUID
 
-from sqlalchemy import DateTime, Enum, ForeignKey, String, Text
+from sqlalchemy import DateTime, ForeignKey, String, Text
 from sqlalchemy.dialects.postgresql import UUID as PG_UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
-from ...domain.entities import Message, MessageStatus, ChannelDelivery
+from ...domain.entities import ChannelDelivery, Message, MessageStatus
 from ...domain.value_objects import ChannelType, MessageContent
 
 

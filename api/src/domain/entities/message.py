@@ -96,12 +96,12 @@ class Message:
     def _update_overall_status(self) -> None:
         """Update overall message status based on channel deliveries."""
         statuses = [d.status for d in self.deliveries]
-        
+
         if all(s == MessageStatus.DELIVERED for s in statuses):
             self.status = MessageStatus.DELIVERED
         elif all(s == MessageStatus.FAILED for s in statuses):
             self.status = MessageStatus.FAILED
         elif any(s == MessageStatus.DELIVERED for s in statuses):
             self.status = MessageStatus.PARTIALLY_DELIVERED
-        
+
         self.updated_at = datetime.utcnow()

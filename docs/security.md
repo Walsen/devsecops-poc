@@ -105,6 +105,52 @@ sequenceDiagram
     API-->>User: Response
 ```
 
+## Authentication Providers
+
+```mermaid
+flowchart TB
+    subgraph Providers["Identity Providers"]
+        COGNITO["Cognito<br/>Email/Password"]
+        GOOGLE["Google<br/>OAuth 2.0"]
+        GITHUB["GitHub<br/>OIDC"]
+        LINKEDIN["LinkedIn<br/>OIDC"]
+    end
+
+    subgraph Pool["Cognito User Pool"]
+        FEDERATE["Federation<br/>Layer"]
+        USERS["User<br/>Directory"]
+        GROUPS["Groups<br/>admin, community-manager"]
+    end
+
+    subgraph Tokens["Token Issuance"]
+        JWT["JWT Tokens<br/>• Access Token (1h)<br/>• ID Token (1h)<br/>• Refresh Token (30d)"]
+    end
+
+    COGNITO --> FEDERATE
+    GOOGLE --> FEDERATE
+    GITHUB --> FEDERATE
+    LINKEDIN --> FEDERATE
+    
+    FEDERATE --> USERS
+    USERS --> GROUPS
+    GROUPS --> JWT
+
+    style COGNITO fill:#ff9800
+    style GOOGLE fill:#4285f4
+    style GITHUB fill:#333
+    style LINKEDIN fill:#0077b5
+```
+
+### OAuth Credentials Storage
+
+OAuth client credentials are stored securely in AWS Secrets Manager:
+
+| Provider | Secret Name | Fields |
+|----------|-------------|--------|
+| Google | `omnichannel/oauth/google` | `client_id`, `client_secret` |
+| GitHub | `omnichannel/oauth/github` | `client_id`, `client_secret` |
+| LinkedIn | `omnichannel/oauth/linkedin` | `client_id`, `client_secret` |
+
 ## Data Protection
 
 ```mermaid

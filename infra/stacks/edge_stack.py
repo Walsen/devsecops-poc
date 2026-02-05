@@ -1,9 +1,17 @@
 from aws_cdk import (
-    Stack,
     CfnOutput,
+    Stack,
+)
+from aws_cdk import (
     aws_cloudfront as cloudfront,
+)
+from aws_cdk import (
     aws_cloudfront_origins as origins,
+)
+from aws_cdk import (
     aws_elasticloadbalancingv2 as elbv2,
+)
+from aws_cdk import (
     aws_wafv2 as wafv2,
 )
 from constructs import Construct

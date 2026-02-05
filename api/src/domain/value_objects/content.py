@@ -6,7 +6,7 @@ class MessageContent:
     """Immutable value object for message content."""
     text: str
     media_url: str | None = None
-    
+
     def __post_init__(self) -> None:
         if not self.text or len(self.text.strip()) == 0:
             raise ValueError("Message text cannot be empty")

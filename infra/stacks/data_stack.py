@@ -1,13 +1,26 @@
 import json
+
 from aws_cdk import (
-    Stack,
     Duration,
     RemovalPolicy,
+    Stack,
+)
+from aws_cdk import (
     aws_ec2 as ec2,
-    aws_rds as rds,
-    aws_s3 as s3,
+)
+from aws_cdk import (
     aws_kinesis as kinesis,
+)
+from aws_cdk import (
     aws_kms as kms,
+)
+from aws_cdk import (
+    aws_rds as rds,
+)
+from aws_cdk import (
+    aws_s3 as s3,
+)
+from aws_cdk import (
     aws_secretsmanager as secretsmanager,
 )
 from constructs import Construct
@@ -20,6 +33,7 @@ class DataStack(Stack):
         id: str,
         vpc: ec2.Vpc,
         kms_key: kms.Key,
+        service_security_group: ec2.SecurityGroup,
         **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)
@@ -42,6 +56,10 @@ class DataStack(Stack):
             vpc=vpc,
             description="Security group for RDS instance",
             allow_all_outbound=False,
+        )
+        # Allow ECS services to connect to RDS
+        db_security_group.add_ingress_rule(
+            service_security_group, ec2.Port.tcp(5432), "From ECS services"
         )
 
         # RDS PostgreSQL - Dev: Single-AZ, smaller instance

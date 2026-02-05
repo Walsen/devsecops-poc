@@ -1,7 +1,7 @@
 import httpx
 import structlog
 
-from .base import ChannelGateway, DeliveryResult
+from .base import ChannelGateway, ChannelType, DeliveryResult
 
 logger = structlog.get_logger()
 
@@ -14,6 +14,10 @@ class WhatsAppGateway(ChannelGateway):
     def __init__(self, access_token: str, phone_number_id: str) -> None:
         self._access_token = access_token
         self._phone_number_id = phone_number_id
+
+    @property
+    def channel_type(self) -> ChannelType:
+        return ChannelType.WHATSAPP
 
     async def send(
         self,

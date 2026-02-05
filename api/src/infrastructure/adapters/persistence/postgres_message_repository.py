@@ -19,7 +19,7 @@ class PostgresMessageRepository(MessageRepository):
     async def save(self, message: Message) -> None:
         """Persist a message (insert or update)."""
         existing = await self._session.get(MessageModel, message.id)
-        
+
         if existing:
             existing.content_text = message.content.text
             existing.content_media_url = message.content.media_url

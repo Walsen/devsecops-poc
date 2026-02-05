@@ -1,9 +1,11 @@
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
 from ....application.dtos import CreateMessageDTO, MessageResponseDTO
 from ....application.ports.inbound import GetMessageUseCase, ScheduleMessageUseCase
+from ...middleware import AuthenticatedUser, require_auth
 from ..dependencies import get_message_use_case, get_schedule_message_use_case
 
 router = APIRouter(prefix="/messages", tags=["messages"])
@@ -18,6 +20,7 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 )
 async def schedule_message(
     request: CreateMessageDTO,
+    user: Annotated[AuthenticatedUser, Depends(require_auth)],
     use_case: ScheduleMessageUseCase = Depends(get_schedule_message_use_case),
 ) -> dict:
     """Schedule a message for async delivery."""
@@ -33,6 +36,7 @@ async def schedule_message(
 )
 async def get_message(
     message_id: UUID,
+    user: Annotated[AuthenticatedUser, Depends(require_auth)],
     use_case: GetMessageUseCase = Depends(get_message_use_case),
 ) -> MessageResponseDTO:
     """Get message by ID."""

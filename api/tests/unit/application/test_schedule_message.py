@@ -3,6 +3,8 @@ from datetime import datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID
 
+from pydantic import ValidationError
+
 from src.application.dtos import CreateMessageDTO
 from src.application.services import ScheduleMessageService
 from src.domain.entities import Message, MessageStatus
@@ -106,12 +108,10 @@ class TestScheduleMessageService:
 
     @pytest.mark.asyncio
     async def test_execute_with_empty_content_raises_error(self, service):
-        dto = CreateMessageDTO(
-            content="",
-            channels=["whatsapp"],
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
-            recipient_id="user-123",
-        )
-        
-        with pytest.raises(ValueError):
-            await service.execute(dto)
+        with pytest.raises(ValidationError):
+            CreateMessageDTO(
+                content="",
+                channels=["whatsapp"],
+                scheduled_at=datetime.utcnow() + timedelta(hours=1),
+                recipient_id="user-123",
+            )

@@ -6,5 +6,6 @@ class ChannelType(str, Enum):
     WHATSAPP = "whatsapp"
     FACEBOOK = "facebook"
     INSTAGRAM = "instagram"
+    LINKEDIN = "linkedin"
     EMAIL = "email"
     SMS = "sms"

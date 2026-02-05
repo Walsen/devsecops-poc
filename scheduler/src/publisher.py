@@ -1,5 +1,4 @@
 import json
-from typing import Any
 
 import structlog
 from aiobotocore.session import get_session

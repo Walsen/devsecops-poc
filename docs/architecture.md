@@ -1,6 +1,313 @@
-# Architecture: Hexagonal (Ports & Adapters)
+# Architecture
 
-## Overview
+## AWS Infrastructure Overview
+
+The Omnichannel Publisher is deployed on AWS using a secure, layered defense architecture with DevSecOps practices.
+
+![AWS Architecture](aws-architecture.png)
+
+### Architecture Components
+
+```mermaid
+flowchart TB
+    subgraph Internet["Internet"]
+        User["👤 User"]
+    end
+
+    subgraph Edge["Edge Layer"]
+        CF["☁️ CloudFront<br/>CDN + TLS 1.3"]
+        WAF["🛡️ AWS WAF<br/>OWASP Top 10<br/>IP Blocklist"]
+        Shield["🔰 AWS Shield<br/>DDoS Protection"]
+    end
+
+    subgraph VPC["AWS VPC (Multi-AZ)"]
+        subgraph Public["Public Subnets"]
+            ALB["⚖️ Application<br/>Load Balancer"]
+        end
+
+        subgraph Private["Private Subnets"]
+            subgraph ECS["Amazon ECS Cluster"]
+                API["🔷 API Service<br/>FastAPI<br/>Fargate"]
+                Worker["🔷 Worker Service<br/>Kinesis Consumer<br/>Fargate"]
+                Scheduler["🔷 Scheduler Service<br/>Cron Jobs<br/>Fargate"]
+            end
+        end
+
+        subgraph Data["Data Layer"]
+            RDS["🗄️ Amazon RDS<br/>PostgreSQL<br/>Multi-AZ"]
+            S3["📦 Amazon S3<br/>Media Storage"]
+        end
+    end
+
+    subgraph Messaging["Event Streaming"]
+        Kinesis["📨 Amazon Kinesis<br/>Data Stream"]
+    end
+
+    subgraph Auth["Authentication"]
+        Cognito["🔐 Amazon Cognito<br/>User Pool"]
+        Google["Google"]
+        GitHub["GitHub"]
+        LinkedIn["LinkedIn"]
+    end
+
+    subgraph Security["Security & Monitoring"]
+        KMS["🔑 AWS KMS<br/>Encryption Keys"]
+        Secrets["🔒 Secrets Manager<br/>Credentials"]
+        GuardDuty["👁️ GuardDuty<br/>Threat Detection"]
+        SecurityHub["📊 Security Hub"]
+        CloudTrail["📝 CloudTrail<br/>Audit Logs"]
+    end
+
+    subgraph Channels["Delivery Channels"]
+        Meta["📱 Meta APIs<br/>WhatsApp, FB, IG"]
+        LI["💼 LinkedIn API"]
+        SES["📧 Amazon SES"]
+        SNS["📲 Amazon SNS"]
+        Bedrock["🤖 Amazon Bedrock<br/>Claude AI Agent"]
+    end
+
+    subgraph AutoResponse["Automated Response"]
+        EventBridge["📡 EventBridge"]
+        Lambda["λ Lambda<br/>IP Blocker"]
+        IPSet["🚫 WAF IP Set"]
+    end
+
+    %% User flow
+    User -->|HTTPS| CF
+    CF --> WAF
+    WAF --> ALB
+    Shield -.-> CF
+    ALB --> API
+
+    %% Auth flow
+    API --> Cognito
+    Cognito --> Google
+    Cognito --> GitHub
+    Cognito --> LinkedIn
+
+    %% Internal flow
+    API --> RDS
+    API --> Kinesis
+    API --> S3
+    Kinesis --> Worker
+    Scheduler --> RDS
+    Scheduler --> Kinesis
+
+    %% Worker delivery
+    Worker --> Meta
+    Worker --> LI
+    Worker --> SES
+    Worker --> SNS
+    Worker -.->|AI Agent| Bedrock
+    Bedrock -.-> Meta
+    Bedrock -.-> LI
+
+    %% Service Discovery
+    API <-.->|Cloud Map| Worker
+    API <-.->|Cloud Map| Scheduler
+
+    %% Security
+    RDS --> KMS
+    S3 --> KMS
+    Kinesis --> KMS
+    API --> Secrets
+    Worker --> Secrets
+
+    %% Threat response
+    GuardDuty --> EventBridge
+    EventBridge --> Lambda
+    Lambda --> IPSet
+    IPSet --> WAF
+
+    %% Monitoring
+    GuardDuty --> SecurityHub
+    CloudTrail --> SecurityHub
+
+    style Edge fill:#ff9800,color:#000
+    style VPC fill:#e3f2fd,color:#000
+    style ECS fill:#bbdefb,color:#000
+    style Data fill:#c8e6c9,color:#000
+    style Security fill:#ffcdd2,color:#000
+    style Channels fill:#e1bee7,color:#000
+```
+
+## Security Layers
+
+```mermaid
+flowchart LR
+    subgraph L1["Layer 1: Edge"]
+        CloudFront
+        WAF
+        Shield
+    end
+
+    subgraph L2["Layer 2: Network"]
+        VPC
+        SecurityGroups
+        NACLs
+    end
+
+    subgraph L3["Layer 3: Application"]
+        Cognito
+        JWT
+        RBAC
+    end
+
+    subgraph L4["Layer 4: Data"]
+        KMS
+        Encryption
+        Secrets
+    end
+
+    subgraph L5["Layer 5: Monitoring"]
+        GuardDuty
+        SecurityHub
+        CloudTrail
+    end
+
+    L1 --> L2 --> L3 --> L4
+    L5 -.->|Monitors| L1
+    L5 -.->|Monitors| L2
+    L5 -.->|Monitors| L3
+    L5 -.->|Monitors| L4
+```
+
+## Service Architecture
+
+```mermaid
+flowchart TB
+    subgraph API["API Service"]
+        direction TB
+        FastAPI["FastAPI"]
+        AuthMW["JWT Auth Middleware"]
+        Routes["REST Routes"]
+        UseCases["Use Cases"]
+        Repo["Repository"]
+    end
+
+    subgraph Worker["Worker Service"]
+        direction TB
+        Consumer["Kinesis Consumer"]
+        Processor["Message Processor"]
+        DeliveryService["Delivery Service"]
+        subgraph Publishers["Publishers"]
+            Direct["Direct Publisher"]
+            Agent["AI Agent Publisher"]
+        end
+        subgraph Gateways["Channel Gateways"]
+            WA["WhatsApp"]
+            FB["Facebook"]
+            IG["Instagram"]
+            LI["LinkedIn"]
+            Email["Email"]
+            SMS["SMS"]
+        end
+    end
+
+    subgraph Scheduler["Scheduler Service"]
+        direction TB
+        APScheduler["APScheduler"]
+        Scanner["Due Message Scanner"]
+        Publisher["Kinesis Publisher"]
+    end
+
+    subgraph Shared["Shared Infrastructure"]
+        RDS[(PostgreSQL)]
+        Kinesis[/Kinesis Stream/]
+        CloudMap["Cloud Map"]
+    end
+
+    API --> RDS
+    API --> Kinesis
+    Kinesis --> Worker
+    Scheduler --> RDS
+    Scheduler --> Kinesis
+    
+    DeliveryService --> Direct
+    DeliveryService --> Agent
+    Direct --> Gateways
+    Agent -->|Tools| Gateways
+
+    API <-.-> CloudMap
+    Worker <-.-> CloudMap
+    Scheduler <-.-> CloudMap
+```
+
+## Data Flow
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant CloudFront
+    participant WAF
+    participant ALB
+    participant API
+    participant Cognito
+    participant RDS
+    participant Kinesis
+    participant Scheduler
+    participant Worker
+    participant Channels
+
+    User->>CloudFront: POST /api/v1/messages
+    CloudFront->>WAF: Check rules
+    WAF->>ALB: Forward (if allowed)
+    ALB->>API: Route request
+    
+    API->>Cognito: Validate JWT
+    Cognito-->>API: User claims
+    
+    API->>RDS: Save message (scheduled)
+    API->>Kinesis: Publish event
+    API-->>User: 201 Created
+
+    Note over Scheduler: Every minute
+    Scheduler->>RDS: Query due messages
+    RDS-->>Scheduler: Messages list
+    Scheduler->>Kinesis: Publish delivery events
+
+    Kinesis->>Worker: Consume events
+    Worker->>Worker: Process message
+    
+    alt AI Agent Enabled
+        Worker->>Worker: AgentPublisher
+        Worker->>Channels: Adapted content per platform
+    else Direct Mode
+        Worker->>Channels: Same content all platforms
+    end
+    
+    Channels-->>Worker: Delivery results
+    Worker->>RDS: Update status
+```
+
+## CDK Stack Dependencies
+
+```mermaid
+flowchart TB
+    Network["NetworkStack<br/>VPC, Subnets"]
+    Security["SecurityStack<br/>KMS, WAF, Security Groups"]
+    Auth["AuthStack<br/>Cognito, Identity Providers"]
+    Data["DataStack<br/>RDS, S3, Kinesis"]
+    Compute["ComputeStack<br/>ECS, Fargate Services"]
+    Edge["EdgeStack<br/>CloudFront, WAF Association"]
+    Monitoring["MonitoringStack<br/>GuardDuty, Security Hub"]
+
+    Network --> Security
+    Network --> Data
+    Security --> Data
+    Security --> Compute
+    Auth --> Compute
+    Data --> Compute
+    Compute --> Edge
+    Network --> Monitoring
+    Security --> Monitoring
+```
+
+---
+
+## Hexagonal Architecture (Ports & Adapters)
+
+### Overview
 
 The Omnichannel Publisher follows Hexagonal Architecture (also known as Ports & Adapters), which isolates the core business logic from external concerns like databases, APIs, and message queues.
 
@@ -357,8 +664,183 @@ graph TB
 | Adapters | Integration | Real DB/services |
 | API | E2E | Full application |
 
+## Worker Service Architecture
+
+The Worker service also follows hexagonal architecture, with support for both direct API publishing and AI-powered intelligent publishing.
+
+### Worker Hexagonal Diagram
+
+```mermaid
+graph TB
+    subgraph Driving["Driving Side (Primary)"]
+        KINESIS_IN["Kinesis<br/>Consumer"]
+    end
+
+    subgraph Application["Application Layer"]
+        DELIVERY["MessageDeliveryService"]
+    end
+
+    subgraph Ports_Out["Outbound Ports"]
+        PUBLISHER["SocialMediaPublisher"]
+        GATEWAY["ChannelGateway"]
+    end
+
+    subgraph Driven["Driven Side (Secondary Adapters)"]
+        subgraph Publishers["Publisher Implementations"]
+            DIRECT["DirectPublisher<br/>(Simple)"]
+            AGENT["AgentPublisher<br/>(AI-Powered)"]
+        end
+        
+        subgraph Channels["Channel Gateways"]
+            FB["FacebookGateway"]
+            IG["InstagramGateway"]
+            LI["LinkedInGateway"]
+            WA["WhatsAppGateway"]
+            EMAIL["EmailGateway"]
+            SMS["SmsGateway"]
+        end
+    end
+
+    KINESIS_IN --> DELIVERY
+    DELIVERY --> PUBLISHER
+    
+    PUBLISHER -.-> DIRECT
+    PUBLISHER -.-> AGENT
+    
+    DIRECT --> GATEWAY
+    AGENT --> GATEWAY
+    
+    GATEWAY -.-> FB
+    GATEWAY -.-> IG
+    GATEWAY -.-> LI
+    GATEWAY -.-> WA
+    GATEWAY -.-> EMAIL
+    GATEWAY -.-> SMS
+
+    style Application fill:#fff3e0
+    style Ports_Out fill:#e1f5fe
+    style Driving fill:#e8f5e9
+    style Driven fill:#fce4ec
+```
+
+### Worker Ports
+
+```mermaid
+classDiagram
+    class SocialMediaPublisher {
+        <<interface>>
+        +publish(request: PublishRequest) PublishResult
+    }
+
+    class ChannelGateway {
+        <<interface>>
+        +channel_type: ChannelType
+        +send(recipient_id, content, media_url) DeliveryResult
+    }
+
+    class DirectPublisher {
+        +publish(request: PublishRequest) PublishResult
+    }
+
+    class AgentPublisher {
+        -Agent _agent
+        -BedrockModel _model
+        +publish(request: PublishRequest) PublishResult
+    }
+
+    SocialMediaPublisher <|.. DirectPublisher
+    SocialMediaPublisher <|.. AgentPublisher
+    DirectPublisher --> ChannelGateway : uses
+    AgentPublisher --> ChannelGateway : uses via tools
+```
+
+### AI Agent Integration
+
+The `AgentPublisher` uses the Strands Agents SDK with Amazon Bedrock to intelligently adapt content for each platform:
+
+```mermaid
+sequenceDiagram
+    participant Processor as MessageProcessor
+    participant Service as MessageDeliveryService
+    participant Agent as AgentPublisher
+    participant Bedrock as Claude (Bedrock)
+    participant Tools as Channel Tools
+    participant Gateway as ChannelGateway
+
+    Processor->>Service: deliver(content, channels)
+    Service->>Agent: publish(PublishRequest)
+    Agent->>Bedrock: Analyze content + channels
+    
+    loop For each channel
+        Bedrock->>Bedrock: Adapt content for platform
+        Bedrock->>Tools: post_to_facebook(adapted_content)
+        Tools->>Gateway: send(content, media_url)
+        Gateway-->>Tools: DeliveryResult
+        Tools-->>Bedrock: Result
+    end
+    
+    Bedrock-->>Agent: Final response + metrics
+    Agent-->>Service: PublishResult
+    Service-->>Processor: PublishResult
+```
+
+### Worker Folder Structure
+
+```
+worker/src/
+├── domain/                          # Domain Layer
+│   └── ports/                       # Outbound port interfaces
+│       ├── channel_gateway.py       # ChannelGateway, DeliveryResult, ChannelType
+│       └── social_media_publisher.py # SocialMediaPublisher, PublishRequest/Result
+│
+├── application/                     # Application Layer
+│   └── services/
+│       └── message_delivery_service.py  # Orchestrates delivery
+│
+├── infrastructure/                  # Infrastructure Layer
+│   └── adapters/
+│       ├── direct_publisher.py      # Simple direct API calls
+│       ├── agent_publisher.py       # AI-powered with Strands SDK
+│       └── channel_gateway_factory.py # Creates gateway instances
+│
+├── channels/                        # Channel Gateway Implementations
+│   ├── base.py                      # Re-exports from domain ports
+│   ├── facebook.py                  # Facebook Graph API
+│   ├── instagram.py                 # Instagram Graph API
+│   ├── linkedin.py                  # LinkedIn API
+│   ├── whatsapp.py                  # WhatsApp Business API
+│   ├── email.py                     # AWS SES
+│   └── sms.py                       # AWS SNS
+│
+├── consumer.py                      # Kinesis consumer (driving adapter)
+├── processor.py                     # Message processor
+├── config.py                        # Settings
+└── main.py                          # Entry point
+```
+
+### Publisher Selection
+
+The worker selects between `DirectPublisher` and `AgentPublisher` based on configuration:
+
+| Setting | Publisher | Behavior |
+|---------|-----------|----------|
+| `USE_AI_AGENT=false` | DirectPublisher | Posts same content to all channels |
+| `USE_AI_AGENT=true` | AgentPublisher | AI adapts content per platform |
+
+### AI Agent Benefits
+
+| Feature | Direct | AI Agent |
+|---------|--------|----------|
+| Speed | Fast | Slower (LLM calls) |
+| Content Adaptation | None | Per-platform optimization |
+| Character Limits | Manual | Automatic |
+| Hashtags | Static | Context-aware |
+| Tone | Same everywhere | Platform-appropriate |
+| Cost | API calls only | + Bedrock tokens |
+
 ## References
 
 - [Hexagonal Architecture by Alistair Cockburn](https://alistair.cockburn.us/hexagonal-architecture/)
 - [Ports and Adapters Pattern](https://herbertograca.com/2017/09/14/ports-adapters-architecture/)
 - [Clean Architecture by Robert C. Martin](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
+- [Strands Agents SDK](https://strandsagents.com/latest/)
