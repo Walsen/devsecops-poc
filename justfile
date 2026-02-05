@@ -62,13 +62,29 @@ scheduler-shell:
     docker compose exec scheduler bash
 
 # Testing
-# Run tests
+# Run all tests
 test:
     docker compose exec api pytest -v
 
+# Run API tests
+test-api:
+    docker compose exec api pytest -v tests/
+
+# Run Worker tests
+test-worker:
+    docker compose exec worker pytest -v tests/
+
 # Run tests with coverage
 test-cov:
-    docker compose exec api pytest --cov=src --cov-report=html
+    docker compose exec api pytest --cov=src --cov-report=html --cov-report=term
+
+# Run specific test file
+test-file file:
+    docker compose exec api pytest -v {{file}}
+
+# Run tests matching pattern
+test-match pattern:
+    docker compose exec api pytest -v -k "{{pattern}}"
 
 # Linting
 # Run linters
