@@ -170,3 +170,11 @@ web-preview:
 # Lint frontend
 web-lint:
     cd web && npm run lint
+
+# Run frontend tests
+web-test:
+    cd web && npm test
+
+# Run frontend tests in watch mode
+web-test-watch:
+    cd web && npm run test:watch

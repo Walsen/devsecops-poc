@@ -102,6 +102,14 @@ if [ -d "web" ] && [ -f "web/package.json" ]; then
         npm ci --prefix web --silent 2>/dev/null
     fi
     
+    echo "  🧪 Running tests..."
+    if npm test --prefix web 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Tests passed${NC}"
+    else
+        echo -e "  ${RED}✗ Tests failed${NC}"
+        FAILED=1
+    fi
+    
     echo "  🔨 Building (TypeScript check)..."
     if npm run build --prefix web 2>/dev/null; then
         echo -e "  ${GREEN}✓ Frontend build passed${NC}"
