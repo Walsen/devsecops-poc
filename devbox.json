@@ -6,7 +6,8 @@
     "yq@latest",
     "uv@latest",
     "awscli2@latest",
-    "nodejs@latest"
+    "nodejs@latest",
+    "gh@latest"
   ],
   "shell": {
     "init_hook": [
