@@ -6,226 +6,262 @@ The Omnichannel Publisher uses AWS Cloud Map as a service registry, enabling ser
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    AWS Cloud Map                             │
-│              Namespace: secure-api.local                     │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  ┌─────────────────┐  ┌─────────────────┐  ┌─────────────┐ │
-│  │   API Service   │  │  Worker Service │  │  Scheduler  │ │
-│  │                 │  │                 │  │   Service   │ │
-│  │ api.secure-api  │  │ worker.secure-  │  │ scheduler.  │ │
-│  │    .local       │  │   api.local     │  │ secure-api  │ │
-│  │                 │  │                 │  │   .local    │ │
-│  └────────┬────────┘  └────────┬────────┘  └──────┬──────┘ │
-│           │                    │                   │        │
-│           └────────────────────┼───────────────────┘        │
-│                                │                            │
-│                    ┌───────────▼───────────┐                │
-│                    │    Route 53 Private   │                │
-│                    │     Hosted Zone       │                │
-│                    └───────────────────────┘                │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
-```
+```mermaid
+flowchart TB
+    subgraph CloudMap["AWS Cloud Map<br/>Namespace: secure-api.local"]
+        API_REG["api.secure-api.local"]
+        WORKER_REG["worker.secure-api.local"]
+        SCHEDULER_REG["scheduler.secure-api.local"]
+    end
 
-## Services
+    subgraph Services["ECS Fargate Services"]
+        API["API Service<br/>:8080"]
+        WORKER["Worker Service<br/>:8080"]
+        SCHEDULER["Scheduler Service<br/>:8080"]
+    end
 
-| Service | DNS Name | Purpose |
-|---------|----------|---------|
-| API | `api.secure-api.local` | Sync REST API, handles user requests |
-| Worker | `worker.secure-api.local` | Async Kinesis consumers, channel delivery |
-| Scheduler | `scheduler.secure-api.local` | Cron jobs, scheduled message dispatch |
+    subgraph DNS["Route 53 Private<br/>Hosted Zone"]
+        R53["DNS Resolution"]
+    end
 
-## How It Works
+    API_REG --> API
+    WORKER_REG --> WORKER
+    SCHEDULER_REG --> SCHEDULER
 
-### 1. Service Registration (Automatic)
+    CloudMap --> R53
 
-When an ECS task starts, it automatically registers with Cloud Map:
-
-```
-Task starts → Health check passes → Registered in Cloud Map → DNS record created
+    style CloudMap fill:#e3f2fd
+    style Services fill:#e8f5e9
 ```
 
-When a task stops or fails health checks:
+## Service Registration Flow
 
+```mermaid
+sequenceDiagram
+    participant ECS as ECS Service
+    participant Task as Fargate Task
+    participant CM as Cloud Map
+    participant R53 as Route 53
+
+    ECS->>Task: Start task
+    Task->>Task: Health check passes
+    Task->>CM: Register instance
+    CM->>R53: Create DNS record
+    R53-->>CM: Record created
+    CM-->>Task: Registration complete
+
+    Note over Task,R53: Task is now discoverable
+
+    Task->>Task: Task stops/fails
+    Task->>CM: Deregister instance
+    CM->>R53: Remove DNS record
 ```
-Task stops → Deregistered from Cloud Map → DNS record removed
-```
-
-### 2. Service Discovery (DNS-based)
-
-Services discover each other via DNS queries:
-
-```python
-# From API service, call worker service
-import httpx
-
-async def notify_worker(message_id: str):
-    # DNS resolves to healthy task IPs
-    async with httpx.AsyncClient() as client:
-        response = await client.post(
-            "http://worker.secure-api.local:8080/process",
-            json={"message_id": message_id}
-        )
-    return response.json()
-```
-
-### 3. Load Balancing
-
-Cloud Map returns multiple IPs when multiple tasks are running:
-
-```bash
-# DNS query returns all healthy instances
-$ dig worker.secure-api.local
-
-;; ANSWER SECTION:
-worker.secure-api.local. 10 IN A 10.0.1.45
-worker.secure-api.local. 10 IN A 10.0.2.67
-```
-
-Client-side load balancing happens automatically via DNS round-robin.
 
 ## Service Communication Patterns
 
-### Sync (Request/Response)
+### Synchronous (Request/Response)
 
-```
-┌─────────┐         ┌─────────┐
-│   API   │──HTTP──▶│ Worker  │
-│ Service │◀──────── │ Service │
-└─────────┘         └─────────┘
+```mermaid
+sequenceDiagram
+    participant API as API Service
+    participant DNS as Cloud Map DNS
+    participant Worker as Worker Service
 
-Use case: Health checks, status queries
-```
-
-### Async (Event-driven)
-
-```
-┌─────────┐         ┌─────────┐         ┌─────────┐
-│   API   │──────▶  │ Kinesis │  ──────▶│ Worker  │
-│ Service │         │ Stream  │         │ Service │
-└─────────┘         └─────────┘         └─────────┘
-
-Use case: Message delivery, heavy processing
+    API->>DNS: Resolve worker.secure-api.local
+    DNS-->>API: 10.0.1.45, 10.0.2.67
+    API->>Worker: HTTP POST /process
+    Worker-->>API: Response
 ```
 
-### Scheduled
+### Asynchronous (Event-driven)
 
-```
-┌───────────┐         ┌─────────┐         ┌─────────┐
-│ Scheduler │──────▶  │ Kinesis │  ──────▶│ Worker  │
-│  Service  │         │ Stream  │         │ Service │
-└───────────┘         └─────────┘         └─────────┘
+```mermaid
+flowchart LR
+    API["API Service"]
+    KINESIS["Kinesis<br/>Stream"]
+    WORKER["Worker Service"]
 
-Use case: Scheduled posts, batch processing
-```
+    API -->|"Publish Event"| KINESIS
+    KINESIS -->|"Consume Event"| WORKER
 
-## Configuration
-
-### Environment Variables
-
-Each service receives discovery configuration:
-
-```python
-# Injected by ECS task definition
-SERVICE_NAMESPACE = "secure-api.local"
-API_SERVICE_HOST = "api.secure-api.local"
-WORKER_SERVICE_HOST = "worker.secure-api.local"
-SCHEDULER_SERVICE_HOST = "scheduler.secure-api.local"
+    style KINESIS fill:#fff3e0
 ```
 
-### Service Client
+### Scheduled Jobs
 
-```python
-# infrastructure/discovery/service_client.py
-from dataclasses import dataclass
-import httpx
-import os
+```mermaid
+flowchart LR
+    SCHEDULER["Scheduler<br/>Service"]
+    DB[("Database")]
+    KINESIS2["Kinesis<br/>Stream"]
+    WORKER2["Worker<br/>Service"]
 
-@dataclass
-class ServiceEndpoints:
-    api: str = os.getenv("API_SERVICE_HOST", "api.secure-api.local")
-    worker: str = os.getenv("WORKER_SERVICE_HOST", "worker.secure-api.local")
-    scheduler: str = os.getenv("SCHEDULER_SERVICE_HOST", "scheduler.secure-api.local")
-    port: int = 8080
-    
-    def api_url(self, path: str) -> str:
-        return f"http://{self.api}:{self.port}{path}"
-    
-    def worker_url(self, path: str) -> str:
-        return f"http://{self.worker}:{self.port}{path}"
+    SCHEDULER -->|"Poll due messages"| DB
+    SCHEDULER -->|"Publish events"| KINESIS2
+    KINESIS2 -->|"Process"| WORKER2
+```
 
+## Services Overview
 
-class ServiceClient:
-    """HTTP client for inter-service communication."""
-    
-    def __init__(self, endpoints: ServiceEndpoints | None = None):
-        self.endpoints = endpoints or ServiceEndpoints()
-        self._client = httpx.AsyncClient(timeout=30.0)
-    
-    async def call_worker(self, path: str, data: dict) -> dict:
-        response = await self._client.post(
-            self.endpoints.worker_url(path),
-            json=data,
-        )
-        response.raise_for_status()
-        return response.json()
-    
-    async def close(self):
-        await self._client.aclose()
+```mermaid
+flowchart TB
+    subgraph External["External"]
+        USER[("👤 User")]
+        ALB["Application<br/>Load Balancer"]
+    end
+
+    subgraph Internal["Internal Services"]
+        API["API Service<br/>api.secure-api.local<br/>• REST endpoints<br/>• Message scheduling"]
+        WORKER["Worker Service<br/>worker.secure-api.local<br/>• Kinesis consumer<br/>• Channel delivery"]
+        SCHEDULER["Scheduler Service<br/>scheduler.secure-api.local<br/>• Cron polling<br/>• Due message dispatch"]
+    end
+
+    subgraph Data["Data Layer"]
+        KINESIS3["Kinesis"]
+        RDS[("RDS")]
+    end
+
+    USER --> ALB --> API
+    API --> KINESIS3
+    API --> RDS
+    SCHEDULER --> RDS
+    SCHEDULER --> KINESIS3
+    KINESIS3 --> WORKER
+    WORKER --> RDS
+
+    style External fill:#e8f5e9
+    style Internal fill:#e3f2fd
+    style Data fill:#fff3e0
+```
+
+## DNS-based Load Balancing
+
+```mermaid
+flowchart TB
+    subgraph Client["API Service"]
+        REQ["HTTP Request"]
+    end
+
+    subgraph DNS2["DNS Query"]
+        QUERY["worker.secure-api.local"]
+    end
+
+    subgraph Response["DNS Response"]
+        IP1["10.0.1.45"]
+        IP2["10.0.2.67"]
+        IP3["10.0.1.89"]
+    end
+
+    subgraph Workers["Worker Tasks"]
+        W1["Task 1<br/>10.0.1.45"]
+        W2["Task 2<br/>10.0.2.67"]
+        W3["Task 3<br/>10.0.1.89"]
+    end
+
+    REQ --> QUERY
+    QUERY --> Response
+    IP1 -.-> W1
+    IP2 -.-> W2
+    IP3 -.-> W3
+
+    style Response fill:#e8f5e9
 ```
 
 ## Health Checks
 
-Cloud Map uses health checks to determine service availability:
+```mermaid
+flowchart LR
+    subgraph Task["Fargate Task"]
+        APP["Application"]
+        HEALTH["/health"]
+        READY["/health/ready"]
+    end
 
-```python
-# presentation/api/health.py
-from fastapi import APIRouter
+    subgraph Checks["Health Checks"]
+        ALB_HC["ALB Health Check<br/>/health"]
+        CM_HC["Cloud Map Health Check<br/>/health"]
+    end
 
-router = APIRouter(tags=["health"])
+    subgraph Status["Registration Status"]
+        HEALTHY["✓ Registered<br/>DNS record active"]
+        UNHEALTHY["✗ Deregistered<br/>DNS record removed"]
+    end
 
-@router.get("/health")
-async def health_check():
-    """Health check endpoint for Cloud Map."""
-    return {"status": "healthy"}
+    ALB_HC --> HEALTH
+    CM_HC --> HEALTH
+    HEALTH -->|"200 OK"| HEALTHY
+    HEALTH -->|"5xx/Timeout"| UNHEALTHY
+```
 
-@router.get("/health/ready")
-async def readiness_check(
-    db: AsyncSession = Depends(get_db),
-    kinesis: KinesisClient = Depends(get_kinesis),
-):
-    """Readiness check - verifies dependencies."""
-    checks = {
-        "database": await check_db(db),
-        "kinesis": await check_kinesis(kinesis),
+## Service Client Implementation
+
+```mermaid
+classDiagram
+    class ServiceEndpoints {
+        +str api
+        +str worker
+        +str scheduler
+        +int port
+        +api_url(path) str
+        +worker_url(path) str
     }
-    
-    all_healthy = all(checks.values())
-    return {
-        "status": "ready" if all_healthy else "not_ready",
-        "checks": checks,
+
+    class ServiceClient {
+        -ServiceEndpoints endpoints
+        -AsyncClient client
+        +call_worker(path, data) dict
+        +call_api(path, data) dict
+        +close()
     }
+
+    ServiceClient --> ServiceEndpoints
+```
+
+## Environment Configuration
+
+```mermaid
+flowchart LR
+    subgraph ECS["ECS Task Definition"]
+        ENV["Environment Variables"]
+    end
+
+    subgraph Config["Service Configuration"]
+        NS["SERVICE_NAMESPACE<br/>secure-api.local"]
+        API_HOST["API_SERVICE_HOST<br/>api.secure-api.local"]
+        WORKER_HOST["WORKER_SERVICE_HOST<br/>worker.secure-api.local"]
+        SCHEDULER_HOST["SCHEDULER_SERVICE_HOST<br/>scheduler.secure-api.local"]
+    end
+
+    ECS --> Config
 ```
 
 ## Benefits
 
-| Benefit | Description |
-|---------|-------------|
-| No hardcoded IPs | Services discover each other dynamically |
-| Auto-scaling friendly | New tasks register automatically |
-| Fault tolerant | Failed tasks deregister, traffic routes to healthy ones |
-| Zero config deploys | No need to update configs when scaling |
-| VPC-native | Private DNS, no public exposure |
+```mermaid
+mindmap
+  root((Service Discovery))
+    Dynamic
+      No hardcoded IPs
+      Auto-registration
+      Auto-deregistration
+    Scalable
+      New tasks register automatically
+      Load balancing via DNS
+    Resilient
+      Failed tasks removed
+      Traffic routes to healthy
+    Simple
+      DNS-based
+      No extra infrastructure
+      VPC-native
+```
 
 ## Comparison with Alternatives
 
 | Approach | Pros | Cons |
 |----------|------|------|
-| **Cloud Map (current)** | AWS-native, auto-registration, DNS-based | AWS-specific |
-| Consul | Feature-rich, multi-cloud | Extra infrastructure to manage |
+| **Cloud Map** | AWS-native, auto-registration, DNS-based | AWS-specific |
+| Consul | Feature-rich, multi-cloud | Extra infrastructure |
 | Eureka | Java ecosystem standard | JVM-centric |
 | Kubernetes DNS | K8s-native | Requires K8s |
 
