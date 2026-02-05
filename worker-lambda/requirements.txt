@@ -1,0 +1,5 @@
+# Worker Lambda dependencies
+boto3>=1.34.0
+pydantic>=2.5.0
+httpx>=0.26.0
+strands-agents>=1.0.0
