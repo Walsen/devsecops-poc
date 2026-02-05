@@ -20,7 +20,7 @@ from ...config import settings
 class ChannelGatewayFactory:
     """
     Factory for creating channel gateway instances.
-    
+
     Encapsulates the creation and configuration of channel gateways.
     Uses lazy initialization to avoid creating unused gateways.
     """
@@ -31,13 +31,13 @@ class ChannelGatewayFactory:
     def get_gateway(cls, channel_type: ChannelType) -> ChannelGateway:
         """
         Get or create a gateway for the specified channel type.
-        
+
         Args:
             channel_type: The channel type to get a gateway for
-            
+
         Returns:
             ChannelGateway implementation for the channel
-            
+
         Raises:
             ValueError: If channel type is not supported
         """

@@ -12,6 +12,7 @@ from enum import Enum
 
 class ChannelType(str, Enum):
     """Supported delivery channels."""
+
     WHATSAPP = "whatsapp"
     FACEBOOK = "facebook"
     INSTAGRAM = "instagram"
@@ -23,6 +24,7 @@ class ChannelType(str, Enum):
 @dataclass
 class DeliveryResult:
     """Result of a channel delivery attempt."""
+
     success: bool
     channel: ChannelType | None = None
     external_id: str | None = None
@@ -32,7 +34,7 @@ class DeliveryResult:
 class ChannelGateway(ABC):
     """
     Outbound port for sending messages through a channel.
-    
+
     This is the interface that infrastructure adapters must implement.
     The application layer depends on this abstraction, not concrete implementations.
     """
@@ -52,12 +54,12 @@ class ChannelGateway(ABC):
     ) -> DeliveryResult:
         """
         Send a message through this channel.
-        
+
         Args:
             recipient_id: Target recipient (may be unused for page posts)
             content: Message content
             media_url: Optional media attachment URL
-            
+
         Returns:
             DeliveryResult with success status and external ID
         """

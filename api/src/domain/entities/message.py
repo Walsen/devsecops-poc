@@ -18,6 +18,7 @@ class MessageStatus(str, Enum):
 @dataclass
 class ChannelDelivery:
     """Tracks delivery status per channel."""
+
     channel: ChannelType
     status: MessageStatus = MessageStatus.SCHEDULED
     delivered_at: datetime | None = None
@@ -27,6 +28,7 @@ class ChannelDelivery:
 @dataclass
 class Message:
     """Message aggregate root."""
+
     id: UUID
     content: MessageContent
     channels: list[ChannelType]
@@ -58,9 +60,7 @@ class Message:
             updated_at=now,
         )
         # Initialize delivery tracking for each channel
-        message.deliveries = [
-            ChannelDelivery(channel=ch) for ch in channels
-        ]
+        message.deliveries = [ChannelDelivery(channel=ch) for ch in channels]
         return message
 
     def schedule(self) -> None:

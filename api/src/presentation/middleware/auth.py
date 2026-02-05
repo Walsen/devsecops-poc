@@ -18,6 +18,7 @@ security = HTTPBearer(auto_error=False)
 @dataclass
 class AuthenticatedUser:
     """Represents an authenticated user from JWT claims."""
+
     sub: str  # User ID
     email: str | None = None
     name: str | None = None
@@ -198,6 +199,7 @@ def require_groups(*required_groups: str):
         async def admin_endpoint(user: AuthenticatedUser = Depends(require_groups("admin"))):
             ...
     """
+
     async def check_groups(
         user: Annotated[AuthenticatedUser, Depends(require_auth)],
     ) -> AuthenticatedUser:

@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field
 
 class CreateMessageDTO(BaseModel):
     """DTO for creating a new message."""
+
     content: str = Field(..., min_length=1, max_length=4096)
     media_url: str | None = None
     channels: list[str] = Field(..., min_length=1)
@@ -15,6 +16,7 @@ class CreateMessageDTO(BaseModel):
 
 class ChannelDeliveryDTO(BaseModel):
     """DTO for channel delivery status."""
+
     channel: str
     status: str
     delivered_at: datetime | None = None
@@ -23,6 +25,7 @@ class ChannelDeliveryDTO(BaseModel):
 
 class MessageResponseDTO(BaseModel):
     """DTO for message response."""
+
     id: UUID
     content: str
     media_url: str | None

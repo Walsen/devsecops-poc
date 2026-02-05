@@ -30,7 +30,8 @@ class EdgeStack(Stack):
 
         # CloudFront WAF WebACL (must be in us-east-1)
         cloudfront_waf = wafv2.CfnWebACL(
-            self, "CloudFrontWaf",
+            self,
+            "CloudFrontWaf",
             default_action=wafv2.CfnWebACL.DefaultActionProperty(allow={}),
             scope="CLOUDFRONT",
             visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(
@@ -91,7 +92,8 @@ class EdgeStack(Stack):
 
         # CloudFront Distribution
         self.distribution = cloudfront.Distribution(
-            self, "Distribution",
+            self,
+            "Distribution",
             default_behavior=cloudfront.BehaviorOptions(
                 origin=origins.HttpOrigin(
                     alb.load_balancer_dns_name,
@@ -108,7 +110,8 @@ class EdgeStack(Stack):
         )
 
         CfnOutput(
-            self, "DistributionDomain",
+            self,
+            "DistributionDomain",
             value=self.distribution.distribution_domain_name,
             export_name="SecureApiDistributionDomain",
         )

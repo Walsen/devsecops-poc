@@ -21,7 +21,8 @@ class SecurityStack(Stack):
 
         # KMS key for encryption at rest
         self.kms_key = kms.Key(
-            self, "EncryptionKey",
+            self,
+            "EncryptionKey",
             enable_key_rotation=True,
             alias="secure-api-key",
             description="KMS key for encrypting RDS, S3, and Kinesis data",
@@ -30,7 +31,8 @@ class SecurityStack(Stack):
 
         # WAF IP Set for blocking malicious IPs (updated by Lambda)
         self.waf_ip_set = wafv2.CfnIPSet(
-            self, "BlockedIpSet",
+            self,
+            "BlockedIpSet",
             name="blocked-ips",
             scope="REGIONAL",
             ip_address_version="IPV4",
@@ -39,13 +41,15 @@ class SecurityStack(Stack):
 
         # Outputs
         CfnOutput(
-            self, "KmsKeyArn",
+            self,
+            "KmsKeyArn",
             value=self.kms_key.key_arn,
             export_name="SecureApiKmsKeyArn",
         )
 
         CfnOutput(
-            self, "WafIpSetArn",
+            self,
+            "WafIpSetArn",
             value=self.waf_ip_set.attr_arn,
             export_name="SecureApiWafIpSetArn",
         )

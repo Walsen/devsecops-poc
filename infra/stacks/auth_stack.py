@@ -17,7 +17,8 @@ class AuthStack(Stack):
 
         # Cognito User Pool
         self.user_pool = cognito.UserPool(
-            self, "UserPool",
+            self,
+            "UserPool",
             user_pool_name="omnichannel-users",
             self_sign_up_enabled=True,
             sign_in_aliases=cognito.SignInAliases(
@@ -47,7 +48,8 @@ class AuthStack(Stack):
 
         # Google Identity Provider
         google_provider = cognito.UserPoolIdentityProviderGoogle(
-            self, "GoogleProvider",
+            self,
+            "GoogleProvider",
             user_pool=self.user_pool,
             client_id=SecretValue.secrets_manager(
                 "omnichannel/oauth/google", json_field="client_id"
@@ -65,7 +67,8 @@ class AuthStack(Stack):
 
         # GitHub Identity Provider (OIDC)
         github_provider = cognito.UserPoolIdentityProviderOidc(
-            self, "GitHubProvider",
+            self,
+            "GitHubProvider",
             user_pool=self.user_pool,
             name="GitHub",
             client_id=SecretValue.secrets_manager(
@@ -92,7 +95,8 @@ class AuthStack(Stack):
 
         # LinkedIn Identity Provider (OIDC)
         linkedin_provider = cognito.UserPoolIdentityProviderOidc(
-            self, "LinkedInProvider",
+            self,
+            "LinkedInProvider",
             user_pool=self.user_pool,
             name="LinkedIn",
             client_id=SecretValue.secrets_manager(
@@ -165,7 +169,8 @@ class AuthStack(Stack):
 
         # Admin group
         cognito.CfnUserPoolGroup(
-            self, "AdminGroup",
+            self,
+            "AdminGroup",
             user_pool_id=self.user_pool.user_pool_id,
             group_name="admin",
             description="Administrators with full access",
@@ -173,7 +178,8 @@ class AuthStack(Stack):
 
         # Community managers group
         cognito.CfnUserPoolGroup(
-            self, "ManagerGroup",
+            self,
+            "ManagerGroup",
             user_pool_id=self.user_pool.user_pool_id,
             group_name="community-manager",
             description="Community managers who can post announcements",
@@ -181,25 +187,29 @@ class AuthStack(Stack):
 
         # Outputs
         CfnOutput(
-            self, "UserPoolId",
+            self,
+            "UserPoolId",
             value=self.user_pool.user_pool_id,
             export_name="OmnichannelUserPoolId",
         )
 
         CfnOutput(
-            self, "UserPoolClientId",
+            self,
+            "UserPoolClientId",
             value=self.user_pool_client.user_pool_client_id,
             export_name="OmnichannelUserPoolClientId",
         )
 
         CfnOutput(
-            self, "UserPoolDomain",
+            self,
+            "UserPoolDomain",
             value=self.user_pool_domain.domain_name,
             export_name="OmnichannelUserPoolDomain",
         )
 
         CfnOutput(
-            self, "CognitoRegion",
+            self,
+            "CognitoRegion",
             value=self.region,
             export_name="OmnichannelCognitoRegion",
         )

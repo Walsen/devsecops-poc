@@ -14,7 +14,8 @@ class NetworkStack(Stack):
         # VPC with public and private subnets across 2 AZs
         # Dev: Single NAT gateway to reduce costs
         self.vpc = ec2.Vpc(
-            self, "SecureApiVpc",
+            self,
+            "SecureApiVpc",
             max_azs=2,
             nat_gateways=1,
             subnet_configuration=[
@@ -52,7 +53,8 @@ class NetworkStack(Stack):
         # Shared security group for ECS services (inter-service communication)
         # Created here to avoid cyclic dependencies between Data and Compute stacks
         self.service_security_group = ec2.SecurityGroup(
-            self, "ServiceSecurityGroup",
+            self,
+            "ServiceSecurityGroup",
             vpc=self.vpc,
             description="Security group for Fargate services (inter-service communication)",
             allow_all_outbound=True,
@@ -64,15 +66,14 @@ class NetworkStack(Stack):
 
         # ALB Security Group (created here to avoid cyclic dependencies)
         self.alb_security_group = ec2.SecurityGroup(
-            self, "AlbSecurityGroup",
+            self,
+            "AlbSecurityGroup",
             vpc=self.vpc,
             description="Security group for ALB",
             allow_all_outbound=True,
         )
         # Dev: Allow HTTP. For production, use HTTPS (443) only.
-        self.alb_security_group.add_ingress_rule(
-            ec2.Peer.any_ipv4(), ec2.Port.tcp(80), "HTTP"
-        )
+        self.alb_security_group.add_ingress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(80), "HTTP")
         # Allow ALB to reach services
         self.service_security_group.add_ingress_rule(
             self.alb_security_group, ec2.Port.tcp(8080), "From ALB"

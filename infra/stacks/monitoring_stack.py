@@ -48,7 +48,8 @@ class MonitoringStack(Stack):
 
         # GuardDuty Detector
         guardduty.CfnDetector(
-            self, "GuardDutyDetector",
+            self,
+            "GuardDutyDetector",
             enable=True,
             finding_publishing_frequency="FIFTEEN_MINUTES",
         )
@@ -58,7 +59,8 @@ class MonitoringStack(Stack):
 
         # CloudTrail - Dev: Single region only
         cloudtrail.Trail(
-            self, "AuditTrail",
+            self,
+            "AuditTrail",
             send_to_cloud_watch_logs=True,
             cloud_watch_logs_retention=logs.RetentionDays.ONE_WEEK,  # Dev: Short retention
             include_global_service_events=True,
@@ -122,7 +124,8 @@ def handler(event, context):
 """
 
         block_ip_lambda = lambda_.Function(
-            self, "BlockIpLambda",
+            self,
+            "BlockIpLambda",
             runtime=lambda_.Runtime.PYTHON_3_11,
             handler="index.handler",
             code=lambda_.Code.from_inline(lambda_code),
@@ -144,7 +147,8 @@ def handler(event, context):
 
         # EventBridge rule to trigger Lambda on GuardDuty findings
         guard_duty_rule = events.Rule(
-            self, "GuardDutyRule",
+            self,
+            "GuardDutyRule",
             event_pattern=events.EventPattern(
                 source=["aws.guardduty"],
                 detail_type=["GuardDuty Finding"],

@@ -50,9 +50,7 @@ class PostgresCertificationRepository(CertificationRepository):
 
         self._session.add(model)
 
-    async def get_by_id(
-        self, submission_id: UUID
-    ) -> CertificationSubmission | None:
+    async def get_by_id(self, submission_id: UUID) -> CertificationSubmission | None:
         stmt = (
             select(CertificationSubmissionModel)
             .options(selectinload(CertificationSubmissionModel.deliveries))

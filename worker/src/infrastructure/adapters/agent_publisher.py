@@ -48,22 +48,22 @@ When posting to multiple platforms:
 def _create_tools():
     """
     Create tool functions that use the channel gateways.
-    
+
     Tools are created as closures to maintain clean separation
     while still accessing the gateway factory.
     """
-    
+
     @tool
     async def post_to_facebook(content: str, media_url: str | None = None) -> dict:
         """
         Post content to the Facebook Page.
-        
+
         Best for longer announcements with images. Supports hashtags and emojis.
-        
+
         Args:
             content: The post content/caption to publish
             media_url: Optional URL to an image to include in the post
-        
+
         Returns:
             Dictionary with success status and post_id or error message
         """
@@ -81,13 +81,13 @@ def _create_tools():
     async def post_to_instagram(content: str, media_url: str) -> dict:
         """
         Post content to Instagram.
-        
+
         Requires an image. Good for visual announcements with emojis and hashtags.
-        
+
         Args:
             content: The caption for the Instagram post
             media_url: URL to the image (required for Instagram)
-        
+
         Returns:
             Dictionary with success status and post_id or error message
         """
@@ -105,13 +105,13 @@ def _create_tools():
     async def post_to_linkedin(content: str, media_url: str | None = None) -> dict:
         """
         Post content to LinkedIn Company Page.
-        
+
         Best for professional announcements. Use formal tone and relevant hashtags.
-        
+
         Args:
             content: The post content for LinkedIn
             media_url: Optional URL to an image to include
-        
+
         Returns:
             Dictionary with success status and post_id or error message
         """
@@ -129,12 +129,12 @@ def _create_tools():
     async def send_whatsapp(content: str) -> dict:
         """
         Send a message to the WhatsApp community group.
-        
+
         Best for quick, celebratory notifications. Keep messages short and personal.
-        
+
         Args:
             content: The message content to send
-        
+
         Returns:
             Dictionary with success status and message_id or error message
         """
@@ -157,7 +157,7 @@ def _create_tools():
 class AgentPublisher(SocialMediaPublisher):
     """
     AI Agent implementation of SocialMediaPublisher using Strands SDK.
-    
+
     Uses Claude on Amazon Bedrock to intelligently adapt content
     for each platform before posting.
     """
@@ -178,16 +178,16 @@ class AgentPublisher(SocialMediaPublisher):
     async def publish(self, request: PublishRequest) -> PublishResult:
         """
         Publish content using the AI agent.
-        
+
         The agent will:
         1. Analyze the content and target channels
         2. Optimize content for each platform
         3. Post to each channel using tools
         4. Return results with summary
-        
+
         Args:
             request: PublishRequest with content and channels
-            
+
         Returns:
             PublishResult with per-channel results and agent summary
         """
@@ -236,7 +236,7 @@ class AgentPublisher(SocialMediaPublisher):
         metrics = {}
         if hasattr(result, "metrics"):
             metrics = result.metrics.get_summary() if hasattr(result.metrics, "get_summary") else {}
-            
+
             # Parse tool usage to get channel results
             if hasattr(result.metrics, "tool_usage"):
                 for tool_name, tool_data in result.metrics.tool_usage.items():
@@ -244,7 +244,8 @@ class AgentPublisher(SocialMediaPublisher):
                     try:
                         channel_type = ChannelType(platform)
                         channel_results[channel_type] = {
-                            "success": tool_data.get("execution_stats", {}).get("success_rate", 0) == 1.0,
+                            "success": tool_data.get("execution_stats", {}).get("success_rate", 0)
+                            == 1.0,
                             "call_count": tool_data.get("execution_stats", {}).get("call_count", 0),
                         }
                     except ValueError:

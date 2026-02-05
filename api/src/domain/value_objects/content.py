@@ -4,6 +4,7 @@ from dataclasses import dataclass
 @dataclass(frozen=True)
 class MessageContent:
     """Immutable value object for message content."""
+
     text: str
     media_url: str | None = None
 

@@ -151,9 +151,7 @@ class CertificationSubmission:
             linkedin_url=linkedin_url,
             personal_message=personal_message,
         )
-        submission.deliveries = [
-            CertificationDelivery(channel=channel) for channel in channels
-        ]
+        submission.deliveries = [CertificationDelivery(channel=channel) for channel in channels]
         return submission
 
     def get_certification_name(self) -> str:
@@ -200,9 +198,7 @@ class CertificationSubmission:
         self._update_status()
 
     def _update_status(self) -> None:
-        delivered = sum(
-            1 for d in self.deliveries if d.status == DeliveryStatus.DELIVERED
-        )
+        delivered = sum(1 for d in self.deliveries if d.status == DeliveryStatus.DELIVERED)
         failed = sum(1 for d in self.deliveries if d.status == DeliveryStatus.FAILED)
         total = len(self.deliveries)
 

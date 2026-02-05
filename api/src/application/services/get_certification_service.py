@@ -21,9 +21,7 @@ class GetCertificationService(GetCertificationUseCase):
             return None
         return self._to_response_dto(submission)
 
-    def _to_response_dto(
-        self, submission: CertificationSubmission
-    ) -> CertificationResponseDTO:
+    def _to_response_dto(self, submission: CertificationSubmission) -> CertificationResponseDTO:
         return CertificationResponseDTO(
             id=submission.id,
             status=submission.status,

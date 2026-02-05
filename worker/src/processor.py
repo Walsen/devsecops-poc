@@ -20,7 +20,7 @@ logger = structlog.get_logger()
 class MessageProcessor:
     """
     Processes messages from Kinesis and delivers to channels.
-    
+
     Uses the MessageDeliveryService (application layer) which depends
     on the SocialMediaPublisher port. The publisher implementation
     (DirectPublisher or AgentPublisher) is selected based on config.
@@ -38,7 +38,7 @@ class MessageProcessor:
         else:
             logger.info("Using Direct publisher for simple delivery")
             publisher = DirectPublisher()
-        
+
         return MessageDeliveryService(publisher)
 
     async def process_scheduled_message(
@@ -48,7 +48,7 @@ class MessageProcessor:
     ) -> None:
         """
         Process a scheduled message and deliver to all channels.
-        
+
         Args:
             message_id: UUID of the message to process
             channels: List of channel names to deliver to
@@ -94,10 +94,7 @@ class MessageProcessor:
                     )
 
             # Update overall message status
-            success_count = sum(
-                1 for r in result.channel_results.values() 
-                if r.get("success")
-            )
+            success_count = sum(1 for r in result.channel_results.values() if r.get("success"))
             if success_count == len(channels):
                 await self._update_status(message_id, "delivered")
             elif success_count > 0:

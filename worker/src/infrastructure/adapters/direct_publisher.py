@@ -21,7 +21,7 @@ logger = structlog.get_logger()
 class DirectPublisher(SocialMediaPublisher):
     """
     Direct implementation of SocialMediaPublisher.
-    
+
     Posts the same content to all channels without optimization.
     Fast and simple, but doesn't adapt content per platform.
     """
@@ -29,15 +29,15 @@ class DirectPublisher(SocialMediaPublisher):
     async def publish(self, request: PublishRequest) -> PublishResult:
         """
         Publish content directly to all requested channels.
-        
+
         Args:
             request: PublishRequest with content and channels
-            
+
         Returns:
             PublishResult with per-channel results
         """
         channel_results: dict[ChannelType, dict] = {}
-        
+
         # Create tasks for parallel execution
         tasks = []
         for channel_type in request.channels:
@@ -85,10 +85,11 @@ class DirectPublisher(SocialMediaPublisher):
     ):
         """Publish to a single channel."""
         gateway = ChannelGatewayFactory.get_gateway(channel_type)
-        
+
         # Instagram requires media
         if channel_type == ChannelType.INSTAGRAM and not media_url:
             from ...domain.ports.channel_gateway import DeliveryResult
+
             return DeliveryResult(
                 success=False,
                 channel=channel_type,

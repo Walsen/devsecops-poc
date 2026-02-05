@@ -15,12 +15,12 @@ logger = structlog.get_logger()
 class MessageDeliveryService:
     """
     Application service that handles message delivery.
-    
+
     This service:
     - Receives messages from the Kinesis consumer
     - Delegates to the appropriate publisher (direct or AI agent)
     - Handles errors and logging
-    
+
     Following hexagonal architecture, this service depends on the
     SocialMediaPublisher port, not concrete implementations.
     """
@@ -28,7 +28,7 @@ class MessageDeliveryService:
     def __init__(self, publisher: SocialMediaPublisher) -> None:
         """
         Initialize with a publisher implementation.
-        
+
         Args:
             publisher: Implementation of SocialMediaPublisher port
                       (DirectPublisher or AgentPublisher)
@@ -44,13 +44,13 @@ class MessageDeliveryService:
     ) -> PublishResult:
         """
         Deliver a message to the specified channels.
-        
+
         Args:
             content: Message content to deliver
             channels: List of channel names (facebook, instagram, etc.)
             media_url: Optional media attachment
             metadata: Optional metadata (certification_type, member_name, etc.)
-            
+
         Returns:
             PublishResult with per-channel results
         """
@@ -83,10 +83,7 @@ class MessageDeliveryService:
         result = await self._publisher.publish(request)
 
         # Log results
-        success_count = sum(
-            1 for r in result.channel_results.values() 
-            if r.get("success", False)
-        )
+        success_count = sum(1 for r in result.channel_results.values() if r.get("success", False))
         logger.info(
             "Message delivery completed",
             total_channels=len(channel_types),

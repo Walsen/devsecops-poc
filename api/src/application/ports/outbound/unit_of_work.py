@@ -6,8 +6,7 @@ class UnitOfWork(ABC):
     """Output port for transaction management."""
 
     @abstractmethod
-    async def __aenter__(self) -> "UnitOfWork":
-        ...
+    async def __aenter__(self) -> "UnitOfWork": ...
 
     @abstractmethod
     async def __aexit__(
@@ -15,8 +14,7 @@ class UnitOfWork(ABC):
         exc_type: type[BaseException] | None,
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
-    ) -> None:
-        ...
+    ) -> None: ...
 
     @abstractmethod
     async def commit(self) -> None:

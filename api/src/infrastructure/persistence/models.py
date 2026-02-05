@@ -15,6 +15,7 @@ class Base(DeclarativeBase):
 
 class MessageModel(Base):
     """SQLAlchemy model for Message entity."""
+
     __tablename__ = "messages"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
@@ -44,8 +45,7 @@ class MessageModel(Base):
             updated_at=message.updated_at,
         )
         model.deliveries = [
-            ChannelDeliveryModel.from_entity(d, message.id)
-            for d in message.deliveries
+            ChannelDeliveryModel.from_entity(d, message.id) for d in message.deliveries
         ]
         return model
 
@@ -68,6 +68,7 @@ class MessageModel(Base):
 
 class ChannelDeliveryModel(Base):
     """SQLAlchemy model for channel delivery tracking."""
+
     __tablename__ = "channel_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -102,6 +103,7 @@ class ChannelDeliveryModel(Base):
 
 class CertificationSubmissionModel(Base):
     """SQLAlchemy model for certification submissions."""
+
     __tablename__ = "certification_submissions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
@@ -122,6 +124,7 @@ class CertificationSubmissionModel(Base):
 
 class CertificationDeliveryModel(Base):
     """SQLAlchemy model for certification delivery tracking."""
+
     __tablename__ = "certification_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)

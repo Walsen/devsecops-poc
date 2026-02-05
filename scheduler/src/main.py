@@ -34,7 +34,7 @@ _session_factory = None
 async def poll_job() -> None:
     """Job that runs on schedule to check for due messages."""
     global _session_factory
-    
+
     if _session_factory is None:
         return
 
@@ -66,7 +66,7 @@ async def main() -> None:
 
     # Handle shutdown signals
     loop = asyncio.get_event_loop()
-    
+
     def shutdown():
         global _running
         _running = False
