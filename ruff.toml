@@ -1,0 +1,31 @@
+# Shared Ruff configuration
+target-version = "py312"
+line-length = 100
+
+[lint]
+select = [
+    "E",      # pycodestyle errors
+    "F",      # pyflakes
+    "I",      # isort
+    "N",      # pep8-naming
+    "W",      # pycodestyle warnings
+    "UP",     # pyupgrade
+    "S",      # bandit (security)
+    "B",      # flake8-bugbear
+    "A",      # flake8-builtins
+    "C4",     # flake8-comprehensions
+    "PT",     # flake8-pytest-style
+    "RUF",    # ruff-specific
+]
+ignore = [
+    "S101",   # Allow assert in tests
+    "B008",   # Allow function calls in defaults (FastAPI Depends)
+]
+
+[lint.per-file-ignores]
+"**/tests/**" = ["S101"]
+"alembic/**" = ["E501"]
+
+[format]
+quote-style = "double"
+indent-style = "space"

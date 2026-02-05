@@ -1,0 +1,9 @@
+# Default owners for everything
+* @Walsen
+
+# Infrastructure requires additional review
+/infra/ @Walsen
+
+# Security-sensitive files
+/.github/workflows/ @Walsen
+/docs/security.md @Walsen
