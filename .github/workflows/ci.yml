@@ -28,10 +28,10 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
-        run: uv run --directory ${{ matrix.service }} ruff check src/
+        run: uv run --directory ${{ matrix.service }} --extra dev ruff check src/
 
       - name: Ruff format check
-        run: uv run --directory ${{ matrix.service }} ruff format --check src/
+        run: uv run --directory ${{ matrix.service }} --extra dev ruff format --check src/
 
   # Frontend lint and build
   lint-web:
@@ -73,7 +73,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
-        run: uv run --directory infra ruff check stacks/
+        run: uv run --directory infra --extra dev ruff check stacks/
 
   # Unit tests
   test:
