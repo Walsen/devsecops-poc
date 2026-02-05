@@ -1,0 +1,120 @@
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_USER: dbadmin
+      POSTGRES_PASSWORD: localdev123
+      POSTGRES_DB: omnichannel
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dbadmin -d omnichannel"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # LocalStack for AWS services (Kinesis, S3, SES, SNS)
+  localstack:
+    image: localstack/localstack:3.0
+    environment:
+      SERVICES: kinesis,s3,ses,sns,secretsmanager
+      DEBUG: 0
+      PERSISTENCE: 1
+    ports:
+      - "4566:4566"
+    volumes:
+      - localstack_data:/var/lib/localstack
+      - ./scripts/localstack-init.sh:/etc/localstack/init/ready.d/init.sh
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4566/_localstack/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # API Service
+  api:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    ports:
+      - "8080:8080"
+    environment:
+      DEBUG: "true"
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: omnichannel
+      DB_USER: dbadmin
+      DB_PASSWORD: localdev123
+      KINESIS_STREAM_NAME: secure-api-events
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    volumes:
+      - ./api/src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # Worker Service
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile.dev
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: omnichannel
+      DB_USER: dbadmin
+      DB_PASSWORD: localdev123
+      KINESIS_STREAM_NAME: secure-api-events
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      # Meta API credentials (optional for local dev)
+      META_ACCESS_TOKEN: ""
+      META_PHONE_NUMBER_ID: ""
+      META_PAGE_ID: ""
+      META_INSTAGRAM_ACCOUNT_ID: ""
+    volumes:
+      - ./worker/src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+  # Scheduler Service
+  scheduler:
+    build:
+      context: ./scheduler
+      dockerfile: Dockerfile.dev
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: omnichannel
+      DB_USER: dbadmin
+      DB_PASSWORD: localdev123
+      KINESIS_STREAM_NAME: secure-api-events
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+      POLL_INTERVAL_SECONDS: 30
+    volumes:
+      - ./scheduler/src:/app/src:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  localstack_data:

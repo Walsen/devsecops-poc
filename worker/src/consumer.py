@@ -28,9 +28,11 @@ class KinesisConsumer:
             region=settings.aws_region,
         )
 
-        async with self._session.create_client(
-            "kinesis", region_name=settings.aws_region
-        ) as client:
+        client_kwargs = {"region_name": settings.aws_region}
+        if settings.aws_endpoint_url:
+            client_kwargs["endpoint_url"] = settings.aws_endpoint_url
+
+        async with self._session.create_client("kinesis", **client_kwargs) as client:
             # Get shard iterator
             stream_desc = await client.describe_stream(
                 StreamName=settings.kinesis_stream_name

@@ -15,9 +15,10 @@ class Settings(BaseSettings):
     db_user: str = "dbadmin"
     db_password: str = ""
     
-    # Kinesis
+    # AWS
     kinesis_stream_name: str = "secure-api-events"
     aws_region: str = "us-east-1"
+    aws_endpoint_url: str | None = None  # For LocalStack
     
     # Scheduler
     poll_interval_seconds: int = 60  # Check for due messages every minute

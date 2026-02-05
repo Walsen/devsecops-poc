@@ -29,9 +29,11 @@ class EventPublisher:
             },
         }
 
-        async with self._session.create_client(
-            "kinesis", region_name=settings.aws_region
-        ) as client:
+        client_kwargs = {"region_name": settings.aws_region}
+        if settings.aws_endpoint_url:
+            client_kwargs["endpoint_url"] = settings.aws_endpoint_url
+
+        async with self._session.create_client("kinesis", **client_kwargs) as client:
             await client.put_record(
                 StreamName=settings.kinesis_stream_name,
                 Data=json.dumps(event).encode("utf-8"),

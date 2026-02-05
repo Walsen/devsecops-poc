@@ -1,0 +1,24 @@
+# Development Dockerfile with hot reload
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# Install uv for fast dependency management
+RUN pip install uv
+
+# Copy dependency files
+COPY pyproject.toml .
+
+# Install dependencies
+RUN uv pip install --system --no-cache ".[dev]"
+
+# Copy application code
+COPY src/ ./src/
+
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+
+EXPOSE 8080
+
+# Use reload for development
+CMD ["uvicorn", "src.main:app", "--host", "0.0.0.0", "--port", "8080", "--reload"]

@@ -36,6 +36,7 @@ def get_event_publisher() -> KinesisEventPublisher:
     return KinesisEventPublisher(
         stream_name=settings.kinesis_stream_name,
         region=settings.aws_region,
+        endpoint_url=settings.aws_endpoint_url,
     )
 
 
