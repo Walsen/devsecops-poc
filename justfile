@@ -32,9 +32,21 @@ clean:
 db-shell:
     docker compose exec postgres psql -U dbadmin -d omnichannel
 
-# Run database migrations (when Alembic is set up)
+# Run database migrations
 db-migrate:
     docker compose exec api alembic upgrade head
+
+# Create a new migration
+db-revision message:
+    docker compose exec api alembic revision --autogenerate -m "{{message}}"
+
+# Show migration history
+db-history:
+    docker compose exec api alembic history
+
+# Rollback last migration
+db-rollback:
+    docker compose exec api alembic downgrade -1
 
 # Service shells
 # Open shell in API container

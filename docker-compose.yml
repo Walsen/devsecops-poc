@@ -55,6 +55,7 @@ services:
       AWS_ENDPOINT_URL: http://localstack:4566
     volumes:
       - ./api/src:/app/src:ro
+      - ./api/alembic:/app/alembic:ro
     depends_on:
       postgres:
         condition: service_healthy
