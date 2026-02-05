@@ -2,11 +2,24 @@ from collections.abc import AsyncGenerator
 
 from fastapi import Depends
 
-from ...application.ports.inbound import GetMessageUseCase, ScheduleMessageUseCase
-from ...application.services import GetMessageService, ScheduleMessageService
+from ...application.ports.inbound import (
+    GetCertificationUseCase,
+    GetMessageUseCase,
+    ListCertificationTypesUseCase,
+    ScheduleMessageUseCase,
+    SubmitCertificationUseCase,
+)
+from ...application.services import (
+    GetCertificationService,
+    GetMessageService,
+    ListCertificationTypesService,
+    ScheduleMessageService,
+    SubmitCertificationService,
+)
 from ...config import settings
 from ...infrastructure.adapters import (
     KinesisEventPublisher,
+    PostgresCertificationRepository,
     PostgresMessageRepository,
     SqlAlchemyUnitOfWork,
 )
@@ -54,3 +67,26 @@ async def get_message_use_case(session=Depends(get_session)) -> GetMessageUseCas
     """Dependency injection for GetMessageUseCase."""
     repository = PostgresMessageRepository(session)
     return GetMessageService(repository)
+
+
+async def get_certification_service(
+    session=Depends(get_session),
+    publisher: KinesisEventPublisher = Depends(get_event_publisher),
+) -> SubmitCertificationUseCase:
+    """Dependency injection for SubmitCertificationUseCase."""
+    repository = PostgresCertificationRepository(session)
+    unit_of_work = SqlAlchemyUnitOfWork(session)
+    return SubmitCertificationService(repository, publisher, unit_of_work)
+
+
+async def get_certification_use_case(
+    session=Depends(get_session),
+) -> GetCertificationUseCase:
+    """Dependency injection for GetCertificationUseCase."""
+    repository = PostgresCertificationRepository(session)
+    return GetCertificationService(repository)
+
+
+def get_list_certification_types_use_case() -> ListCertificationTypesUseCase:
+    """Dependency injection for ListCertificationTypesUseCase."""
+    return ListCertificationTypesService()

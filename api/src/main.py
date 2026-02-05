@@ -5,7 +5,7 @@ from fastapi import FastAPI
 
 from .config import settings
 from .presentation.api.dependencies import get_database
-from .presentation.api.v1 import health, messages
+from .presentation.api.v1 import certifications, health, messages
 
 # Configure structured logging
 structlog.configure(
@@ -51,6 +51,7 @@ app = FastAPI(
 # Include routers
 app.include_router(health.router)
 app.include_router(messages.router, prefix="/api/v1")
+app.include_router(certifications.router, prefix="/api/v1")
 
 
 @app.get("/")

@@ -16,6 +16,9 @@ node_modules/
 # CDK
 cdk.out/
 
+# Frontend
+web/dist/
+
 # Environment
 .env
 .env.local

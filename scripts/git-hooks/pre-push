@@ -93,6 +93,26 @@ else
     FAILED=1
 fi
 
+# Check frontend
+echo -e "\n${YELLOW}━━━ Checking Frontend ━━━${NC}"
+if [ -d "web" ] && [ -f "web/package.json" ]; then
+    echo "  📦 Checking dependencies..."
+    if [ ! -d "web/node_modules" ]; then
+        echo "  Installing dependencies..."
+        npm ci --prefix web --silent 2>/dev/null
+    fi
+    
+    echo "  🔨 Building (TypeScript check)..."
+    if npm run build --prefix web 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Frontend build passed${NC}"
+    else
+        echo -e "  ${RED}✗ Frontend build failed${NC}"
+        FAILED=1
+    fi
+else
+    echo -e "  ${YELLOW}⚠ Frontend not found, skipping${NC}"
+fi
+
 # Summary
 echo -e "\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 if [ $FAILED -eq 0 ]; then

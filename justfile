@@ -149,3 +149,24 @@ cdk-deploy:
 # Destroy CDK stacks
 cdk-destroy:
     cd infra && cdk destroy --all
+
+# Frontend
+# Install frontend dependencies
+web-install:
+    cd web && npm install
+
+# Start frontend dev server
+web-dev:
+    cd web && npm run dev
+
+# Build frontend for production
+web-build:
+    cd web && npm run build
+
+# Preview production build
+web-preview:
+    cd web && npm run preview
+
+# Lint frontend
+web-lint:
+    cd web && npm run lint
