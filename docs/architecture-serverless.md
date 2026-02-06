@@ -155,15 +155,25 @@ The serverless architecture uses a single DynamoDB table with a flexible schema 
 ```mermaid
 erDiagram
     MAIN_TABLE {
-        string PK "Partition Key"
-        string SK "Sort Key"
-        string GSI1PK "User queries"
-        string GSI1SK "User queries"
-        string GSI2PK "Status queries"
-        string GSI2SK "Scheduled time"
-        number ttl "Time to live"
+        string PK
+        string SK
+        string GSI1PK
+        string GSI1SK
+        string GSI2PK
+        string GSI2SK
+        number ttl
     }
 ```
+
+| Attribute | Description |
+|-----------|-------------|
+| PK | Partition Key (e.g., `MSG#<id>`) |
+| SK | Sort Key (e.g., `METADATA`, `CHANNEL#facebook`) |
+| GSI1PK | User queries partition key |
+| GSI1SK | User queries sort key |
+| GSI2PK | Status queries partition key |
+| GSI2SK | Scheduled time for ordering |
+| ttl | Time to live for auto-expiration |
 
 #### Access Patterns
 
