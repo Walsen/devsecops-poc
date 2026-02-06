@@ -536,6 +536,301 @@ ENV PYTHONDONTWRITEBYTECODE=1
 ENTRYPOINT ["python", "-m", "uvicorn", "main:app"]
 ```
 
+## CI/CD Security Configuration
+
+### GitHub Actions OIDC Setup
+
+GitHub Actions uses OIDC (OpenID Connect) to assume AWS IAM roles without storing long-lived credentials.
+
+```mermaid
+sequenceDiagram
+    participant GH as GitHub Actions
+    participant OIDC as GitHub OIDC Provider
+    participant STS as AWS STS
+    participant IAM as IAM Role
+    participant AWS as AWS Services
+
+    GH->>OIDC: Request OIDC token
+    OIDC-->>GH: JWT token (short-lived)
+    GH->>STS: AssumeRoleWithWebIdentity
+    STS->>IAM: Validate trust policy
+    IAM-->>STS: Role credentials
+    STS-->>GH: Temporary credentials (1h)
+    GH->>AWS: Deploy with temp credentials
+```
+
+### Required GitHub Secrets
+
+| Secret | Description |
+|--------|-------------|
+| `AWS_ACCOUNT_ID` | Your AWS account ID (12 digits) |
+| `AWS_DEPLOY_ROLE_ARN` | IAM role ARN for deployments |
+| `AWS_SECURITY_SCAN_ROLE_ARN` | IAM role ARN for Prowler security scans (optional) |
+| `SLACK_WEBHOOK_URL` | Slack webhook for notifications (optional) |
+
+### Bootstrap (One-Time Setup)
+
+Before GitHub Actions can use OIDC, you must create the OIDC provider and IAM roles. This is a chicken-and-egg problem - you need AWS credentials to create the infrastructure that enables credential-free deployments.
+
+**Option A: AWS CLI (Recommended)**
+
+```bash
+# Deploy the bootstrap stack with your local AWS credentials
+aws cloudformation deploy \
+  --template-file github-oidc-bootstrap.yaml \
+  --stack-name github-oidc-bootstrap \
+  --parameter-overrides GitHubOrg=YOUR_ORG GitHubRepo=YOUR_REPO \
+  --capabilities CAPABILITY_NAMED_IAM
+
+# Get the role ARNs for GitHub secrets
+aws cloudformation describe-stacks \
+  --stack-name github-oidc-bootstrap \
+  --query "Stacks[0].Outputs"
+```
+
+**Option B: AWS Console**
+
+1. Go to CloudFormation → Create Stack
+2. Upload the template below
+3. Enter your GitHub org/repo
+4. Copy the output role ARNs to GitHub secrets
+
+### Step 1: Create OIDC Identity Provider
+
+```bash
+# Create the OIDC provider (one-time setup)
+aws iam create-open-id-connect-provider \
+  --url https://token.actions.githubusercontent.com \
+  --client-id-list sts.amazonaws.com \
+  --thumbprint-list 6938fd4d98bab03faadb97b34396831e3780aea1
+```
+
+Or via CDK:
+
+```python
+from aws_cdk import aws_iam as iam
+
+# GitHub OIDC Provider
+github_provider = iam.OpenIdConnectProvider(
+    self,
+    "GitHubOIDC",
+    url="https://token.actions.githubusercontent.com",
+    client_ids=["sts.amazonaws.com"],
+)
+```
+
+### Step 2: Create Deploy Role
+
+```python
+from aws_cdk import aws_iam as iam
+
+# Deploy Role - used by GitHub Actions for CDK deployments
+deploy_role = iam.Role(
+    self,
+    "GitHubDeployRole",
+    role_name="github-actions-deploy",
+    assumed_by=iam.WebIdentityPrincipal(
+        github_provider.open_id_connect_provider_arn,
+        conditions={
+            "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            },
+            "StringLike": {
+                # Restrict to your repository and branches
+                "token.actions.githubusercontent.com:sub": "repo:YOUR_ORG/YOUR_REPO:*",
+            },
+        },
+    ),
+    max_session_duration=Duration.hours(1),
+)
+
+# Permissions for CDK deployments
+deploy_role.add_managed_policy(
+    iam.ManagedPolicy.from_aws_managed_policy_name("PowerUserAccess")
+)
+
+# Additional permissions for CDK bootstrap
+deploy_role.add_to_policy(
+    iam.PolicyStatement(
+        actions=[
+            "iam:PassRole",
+            "iam:GetRole",
+            "iam:CreateRole",
+            "iam:AttachRolePolicy",
+            "iam:PutRolePolicy",
+        ],
+        resources=["arn:aws:iam::*:role/cdk-*"],
+    )
+)
+```
+
+### Step 3: Create Security Scan Role (Optional)
+
+```python
+# Security Scan Role - read-only for Prowler audits
+security_scan_role = iam.Role(
+    self,
+    "GitHubSecurityScanRole",
+    role_name="github-actions-security-scan",
+    assumed_by=iam.WebIdentityPrincipal(
+        github_provider.open_id_connect_provider_arn,
+        conditions={
+            "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+            },
+            "StringLike": {
+                "token.actions.githubusercontent.com:sub": "repo:YOUR_ORG/YOUR_REPO:*",
+            },
+        },
+    ),
+    max_session_duration=Duration.hours(1),
+)
+
+# Read-only access for security scanning
+security_scan_role.add_managed_policy(
+    iam.ManagedPolicy.from_aws_managed_policy_name("SecurityAudit")
+)
+security_scan_role.add_managed_policy(
+    iam.ManagedPolicy.from_aws_managed_policy_name("ReadOnlyAccess")
+)
+```
+
+### CloudFormation Template (Alternative)
+
+If you prefer raw CloudFormation:
+
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Description: GitHub Actions OIDC roles for CI/CD
+
+Parameters:
+  GitHubOrg:
+    Type: String
+    Description: GitHub organization or username
+  GitHubRepo:
+    Type: String
+    Description: GitHub repository name
+
+Resources:
+  GitHubOIDCProvider:
+    Type: AWS::IAM::OIDCProvider
+    Properties:
+      Url: https://token.actions.githubusercontent.com
+      ClientIdList:
+        - sts.amazonaws.com
+      ThumbprintList:
+        - 6938fd4d98bab03faadb97b34396831e3780aea1
+
+  GitHubDeployRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-actions-deploy
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOIDCProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/PowerUserAccess
+      Policies:
+        - PolicyName: CDKBootstrapAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                  - iam:GetRole
+                  - iam:CreateRole
+                  - iam:AttachRolePolicy
+                  - iam:PutRolePolicy
+                Resource: arn:aws:iam::*:role/cdk-*
+
+  GitHubSecurityScanRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: github-actions-security-scan
+      MaxSessionDuration: 3600
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !GetAtt GitHubOIDCProvider.Arn
+            Action: sts:AssumeRoleWithWebIdentity
+            Condition:
+              StringEquals:
+                token.actions.githubusercontent.com:aud: sts.amazonaws.com
+              StringLike:
+                token.actions.githubusercontent.com:sub: !Sub repo:${GitHubOrg}/${GitHubRepo}:*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/SecurityAudit
+        - arn:aws:iam::aws:policy/ReadOnlyAccess
+
+Outputs:
+  DeployRoleArn:
+    Description: ARN of the deploy role for GitHub Actions
+    Value: !GetAtt GitHubDeployRole.Arn
+    Export:
+      Name: GitHubDeployRoleArn
+
+  SecurityScanRoleArn:
+    Description: ARN of the security scan role for GitHub Actions
+    Value: !GetAtt GitHubSecurityScanRole.Arn
+    Export:
+      Name: GitHubSecurityScanRoleArn
+```
+
+### Restricting Access by Branch
+
+For production environments, restrict which branches can assume the role:
+
+```python
+# Production deploy role - only main branch
+prod_deploy_role = iam.Role(
+    self,
+    "GitHubProdDeployRole",
+    role_name="github-actions-deploy-prod",
+    assumed_by=iam.WebIdentityPrincipal(
+        github_provider.open_id_connect_provider_arn,
+        conditions={
+            "StringEquals": {
+                "token.actions.githubusercontent.com:aud": "sts.amazonaws.com",
+                # Only allow main branch
+                "token.actions.githubusercontent.com:sub": "repo:YOUR_ORG/YOUR_REPO:ref:refs/heads/main",
+            },
+        },
+    ),
+)
+```
+
+### GitHub Workflow Usage
+
+```yaml
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write   # Required for OIDC
+      contents: read
+    steps:
+      - uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: us-east-1
+      
+      - name: Deploy
+        run: cdk deploy --all
+```
+
 ## References
 
 - [NIST Zero Trust Architecture (SP 800-207)](https://csrc.nist.gov/publications/detail/sp/800-207/final)
@@ -543,6 +838,7 @@ ENTRYPOINT ["python", "-m", "uvicorn", "main:app"]
 - [OWASP Container Security](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
 - [AWS Well-Architected Security Pillar](https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html)
 - [Penetration Testing Guide](penetration-testing.md) - Manual and automated security testing
+- [GitHub OIDC with AWS](https://docs.github.com/en/actions/deployment/security-hardening-your-deployments/configuring-openid-connect-in-amazon-web-services)
 
 ---
 
