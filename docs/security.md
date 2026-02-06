@@ -577,7 +577,7 @@ Before GitHub Actions can use OIDC, you must create the OIDC provider and IAM ro
 ```bash
 # Deploy the bootstrap stack with your local AWS credentials
 aws cloudformation deploy \
-  --template-file github-oidc-bootstrap.yaml \
+  --template-file infra/github-oidc-bootstrap.yaml \
   --stack-name github-oidc-bootstrap \
   --parameter-overrides GitHubOrg=YOUR_ORG GitHubRepo=YOUR_REPO \
   --capabilities CAPABILITY_NAMED_IAM
