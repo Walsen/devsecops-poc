@@ -2,6 +2,8 @@
 
 This document describes the fully serverless architecture for the Omnichannel Publisher platform using AWS Lambda, DynamoDB, and API Gateway.
 
+![AWS Serverless Architecture](aws-architecture-serverless.png)
+
 ## Overview
 
 The serverless architecture provides a cost-effective alternative to the container-based deployment, ideal for development, low-traffic, and variable workloads.
