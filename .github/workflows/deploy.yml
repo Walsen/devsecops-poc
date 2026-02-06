@@ -199,13 +199,53 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Get network configuration from CloudFormation
+        id: network
+        run: |
+          # Get VPC ID from NetworkStack
+          VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name NetworkStack \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$VPC_ID" ]; then
+            echo "NetworkStack not found, skipping migrations"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Get private subnets
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:aws-cdk:subnet-type,Values=Private" \
+            --query "Subnets[*].SubnetId" \
+            --output text | tr '\t' ',')
+          
+          # Get security group from ComputeStack
+          SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name ComputeStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceSecurityGroupId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$SG_ID" ]; then
+            # Fallback: find by tag
+            SG_ID=$(aws ec2 describe-security-groups \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=description,Values=*Fargate services*" \
+              --query "SecurityGroups[0].GroupId" \
+              --output text 2>/dev/null || echo "")
+          fi
+          
+          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
+          echo "security_group=$SG_ID" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
       - name: Run migrations
+        if: steps.network.outputs.skip != 'true'
         run: |
           aws ecs run-task \
             --cluster secure-api-cluster \
             --task-definition api-migration \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.TASK_SECURITY_GROUP }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.network.outputs.subnets }}],securityGroups=[${{ steps.network.outputs.security_group }}],assignPublicIp=DISABLED}" \
             --no-cli-pager || echo "Migration task not configured yet"
 
   # Notify on completion

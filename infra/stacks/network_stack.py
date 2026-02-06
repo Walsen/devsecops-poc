@@ -1,4 +1,5 @@
 from aws_cdk import (
+    CfnOutput,
     Stack,
 )
 from aws_cdk import (
@@ -90,3 +91,18 @@ class NetworkStack(Stack):
         #     "EcrEndpoint",
         #     service=ec2.InterfaceVpcEndpointAwsService.ECR,
         # )
+
+        # CloudFormation Outputs for CI/CD
+        CfnOutput(self, "VpcId", value=self.vpc.vpc_id, export_name="VpcId")
+        CfnOutput(
+            self,
+            "PrivateSubnetIds",
+            value=",".join([s.subnet_id for s in self.vpc.private_subnets]),
+            export_name="PrivateSubnetIds",
+        )
+        CfnOutput(
+            self,
+            "ServiceSecurityGroupId",
+            value=self.service_security_group.security_group_id,
+            export_name="ServiceSecurityGroupId",
+        )
