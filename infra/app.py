@@ -67,6 +67,9 @@ monitoring_stack = MonitoringStack(
     env=env,
     vpc=network_stack.vpc,
     waf_ip_set=security_stack.waf_ip_set,
+    api_log_group=compute_stack.api_log_group,
+    worker_log_group=compute_stack.worker_log_group,
+    scheduler_log_group=compute_stack.scheduler_log_group,
 )
 
 app.synth()

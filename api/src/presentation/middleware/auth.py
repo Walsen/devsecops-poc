@@ -1,6 +1,16 @@
+"""JWT Authentication Middleware with security hardening.
+
+Security features:
+- Algorithm restriction (RS256 only, no algorithm confusion)
+- Strict audience validation
+- Strict issuer validation
+- JWKS cache with TTL and forced refresh on key rotation
+- Token type validation (access vs id token)
+"""
+
 import time
 from dataclasses import dataclass
-from typing import Annotated
+from typing import Annotated, Any
 
 import httpx
 import structlog
@@ -14,6 +24,12 @@ logger = structlog.get_logger()
 
 security = HTTPBearer(auto_error=False)
 
+# Security: Only allow RS256 algorithm (prevents algorithm confusion attacks)
+ALLOWED_ALGORITHMS = ["RS256"]
+
+# Security: Required claims that must be present
+REQUIRED_CLAIMS = ["sub", "exp", "iat", "iss"]
+
 
 @dataclass
 class AuthenticatedUser:
@@ -23,6 +39,7 @@ class AuthenticatedUser:
     email: str | None = None
     name: str | None = None
     groups: list[str] | None = None
+    token_use: str | None = None  # 'access' or 'id'
 
     @property
     def user_id(self) -> str:
@@ -30,77 +47,164 @@ class AuthenticatedUser:
 
 
 class JWTAuthMiddleware:
-    """JWT authentication using Cognito JWKS."""
+    """JWT authentication using Cognito JWKS with security hardening."""
 
     def __init__(
         self,
         jwks_url: str,
-        audience: str | None = None,
-        issuer: str | None = None,
+        audience: str,
+        issuer: str,
+        cache_ttl: int = 3600,
+        allowed_algorithms: list[str] | None = None,
     ):
         self.jwks_url = jwks_url
         self.audience = audience
         self.issuer = issuer
-        self._jwks_cache: dict | None = None
+        self._jwks_cache: dict[str, Any] | None = None
         self._jwks_cache_time: float = 0
-        self._cache_ttl = 3600  # 1 hour
+        self._cache_ttl = cache_ttl
+        self._allowed_algorithms = allowed_algorithms or ALLOWED_ALGORITHMS
 
-    async def _get_jwks(self) -> dict:
-        """Fetch and cache JWKS from Cognito."""
+        # Security: Validate configuration at init time
+        if not audience:
+            raise ValueError("Audience (client_id) is required for JWT validation")
+        if not issuer:
+            raise ValueError("Issuer is required for JWT validation")
+
+    async def _get_jwks(self, force_refresh: bool = False) -> dict[str, Any]:
+        """Fetch and cache JWKS from Cognito.
+
+        Args:
+            force_refresh: Force refresh even if cache is valid (for key rotation)
+        """
         now = time.time()
 
-        if self._jwks_cache and (now - self._jwks_cache_time) < self._cache_ttl:
+        if (
+            not force_refresh
+            and self._jwks_cache
+            and (now - self._jwks_cache_time) < self._cache_ttl
+        ):
             return self._jwks_cache
 
-        async with httpx.AsyncClient() as client:
-            response = await client.get(self.jwks_url)
-            response.raise_for_status()
-            self._jwks_cache = response.json()
-            self._jwks_cache_time = now
+        try:
+            async with httpx.AsyncClient(timeout=10.0) as client:
+                response = await client.get(self.jwks_url)
+                response.raise_for_status()
+                self._jwks_cache = response.json()
+                self._jwks_cache_time = now
 
-        return self._jwks_cache
+            logger.debug("JWKS cache refreshed", url=self.jwks_url)
+            return self._jwks_cache
 
-    async def _get_signing_key(self, token: str) -> dict:
-        """Get the signing key for a token from JWKS."""
-        jwks = await self._get_jwks()
+        except httpx.HTTPError as e:
+            logger.error("Failed to fetch JWKS", error=str(e), url=self.jwks_url)
+            # If we have a cached version, use it even if expired
+            if self._jwks_cache:
+                logger.warning("Using expired JWKS cache due to fetch failure")
+                return self._jwks_cache
+            raise JWTError("Unable to fetch JWKS") from e
 
-        # Get the kid from token header
-        unverified_header = jwt.get_unverified_header(token)
+    async def _get_signing_key(self, token: str) -> dict[str, Any]:
+        """Get the signing key for a token from JWKS.
+
+        Security: Validates algorithm in header before processing.
+        """
+        # Security: Get unverified header to check algorithm FIRST
+        try:
+            unverified_header = jwt.get_unverified_header(token)
+        except JWTError as e:
+            raise JWTError("Invalid token header") from e
+
+        # Security: Reject tokens with disallowed algorithms
+        alg = unverified_header.get("alg")
+        if alg not in self._allowed_algorithms:
+            logger.warning(
+                "Token with disallowed algorithm rejected",
+                algorithm=alg,
+                allowed=self._allowed_algorithms,
+            )
+            raise JWTError(
+                f"Algorithm {alg} not allowed. Must be one of: {self._allowed_algorithms}"
+            )
+
         kid = unverified_header.get("kid")
-
         if not kid:
             raise JWTError("Token missing kid header")
 
-        # Find matching key
-        for key in jwks.get("keys", []):
-            if key.get("kid") == kid:
-                return key
+        # Try to find key in cache first
+        jwks = await self._get_jwks()
+        key = self._find_key_by_kid(jwks, kid)
+
+        if key:
+            return key
+
+        # Security: Key not found - might be key rotation, force refresh once
+        logger.info("Key not found in cache, forcing JWKS refresh", kid=kid)
+        jwks = await self._get_jwks(force_refresh=True)
+        key = self._find_key_by_kid(jwks, kid)
+
+        if key:
+            return key
 
         raise JWTError(f"Unable to find matching key for kid: {kid}")
 
-    async def verify_token(self, token: str) -> dict:
-        """Verify JWT token and return claims."""
+    def _find_key_by_kid(self, jwks: dict[str, Any], kid: str) -> dict[str, Any] | None:
+        """Find a key in JWKS by kid."""
+        for key in jwks.get("keys", []):
+            if key.get("kid") == kid:
+                return key
+        return None
+
+    def _validate_required_claims(self, claims: dict[str, Any]) -> None:
+        """Validate that all required claims are present."""
+        missing = [claim for claim in REQUIRED_CLAIMS if claim not in claims]
+        if missing:
+            raise JWTError(f"Missing required claims: {missing}")
+
+    async def verify_token(self, token: str) -> dict[str, Any]:
+        """Verify JWT token and return claims.
+
+        Security features:
+        - Algorithm restriction (checked before signature verification)
+        - Strict audience validation
+        - Strict issuer validation
+        - Required claims validation
+        - Expiration validation
+        """
         try:
             signing_key = await self._get_signing_key(token)
 
             # Build public key
             public_key = jwk.construct(signing_key)
 
-            # Decode and verify
+            # Security: Strict validation options
             options = {
                 "verify_signature": True,
                 "verify_exp": True,
-                "verify_aud": self.audience is not None,
-                "verify_iss": self.issuer is not None,
+                "verify_iat": True,
+                "verify_aud": True,  # Always verify audience
+                "require_exp": True,
+                "require_iat": True,
             }
 
+            # Decode and verify with strict settings
             claims = jwt.decode(
                 token,
                 public_key,
-                algorithms=["RS256"],
+                algorithms=self._allowed_algorithms,  # Security: Only allow specific algorithms
                 audience=self.audience,
                 issuer=self.issuer,
                 options=options,
+            )
+
+            # Security: Validate required claims are present
+            self._validate_required_claims(claims)
+
+            # Security: Log successful verification (without sensitive data)
+            logger.debug(
+                "Token verified successfully",
+                sub=claims.get("sub"),
+                token_use=claims.get("token_use"),
             )
 
             return claims
@@ -125,6 +229,9 @@ def get_auth_middleware() -> JWTAuthMiddleware:
     if _auth_middleware is None:
         if not settings.cognito_user_pool_id or not settings.cognito_region:
             raise RuntimeError("Cognito settings not configured")
+
+        if not settings.cognito_client_id:
+            raise RuntimeError("Cognito client ID (audience) not configured")
 
         jwks_url = (
             f"https://cognito-idp.{settings.cognito_region}.amazonaws.com/"
@@ -166,11 +273,21 @@ async def get_current_user(
     auth = get_auth_middleware()
     claims = await auth.verify_token(credentials.credentials)
 
+    # Security: Validate sub claim is present and not empty
+    sub = claims.get("sub")
+    if not sub:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: missing subject",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return AuthenticatedUser(
-        sub=claims.get("sub"),
+        sub=sub,
         email=claims.get("email"),
         name=claims.get("name") or claims.get("cognito:username"),
         groups=claims.get("cognito:groups", []),
+        token_use=claims.get("token_use"),
     )
 
 
@@ -206,6 +323,12 @@ def require_groups(*required_groups: str):
         user_groups = user.groups or []
 
         if not any(g in user_groups for g in required_groups):
+            logger.warning(
+                "Access denied: missing required group",
+                user_id=user.user_id,
+                required_groups=required_groups,
+                user_groups=user_groups,
+            )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"Requires one of groups: {', '.join(required_groups)}",

@@ -4,22 +4,18 @@ import structlog
 from fastapi import FastAPI
 
 from .config import settings
+from .infrastructure.logging import configure_logging
 from .presentation.api.dependencies import get_database
 from .presentation.api.v1 import certifications, health, messages
-
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
+from .presentation.middleware import (
+    CorrelationIdMiddleware,
+    RateLimitMiddleware,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
+
+# Configure enterprise logging
+configure_logging(settings.service_name)
 
 logger = structlog.get_logger()
 
@@ -48,6 +44,12 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Security: Add middleware (order matters - first added = last executed)
+app.add_middleware(RateLimitMiddleware)  # Per-user rate limiting
+app.add_middleware(RequestSizeLimitMiddleware, max_size=1 * 1024 * 1024)  # 1 MB limit
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CorrelationIdMiddleware)  # Request tracing (runs first)
+
 # Include routers
 app.include_router(health.router)
 app.include_router(messages.router, prefix="/api/v1")
@@ -55,7 +57,7 @@ app.include_router(certifications.router, prefix="/api/v1")
 
 
 @app.get("/")
-async def root():
+def root() -> dict:
     return {
         "service": settings.service_name,
         "version": "0.1.0",

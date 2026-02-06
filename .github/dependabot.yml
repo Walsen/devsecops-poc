@@ -71,3 +71,25 @@ updates:
     labels:
       - "dependencies"
       - "docker"
+
+  # Frontend (npm)
+  - package-ecosystem: "npm"
+    directory: "/web"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "javascript"
+      - "frontend"
+
+  # Serverless infrastructure
+  - package-ecosystem: "pip"
+    directory: "/infra-fs"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "python"
+      - "infrastructure"

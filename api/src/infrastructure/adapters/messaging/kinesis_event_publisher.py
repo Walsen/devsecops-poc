@@ -1,9 +1,13 @@
 import json
 from typing import Any
 
+import structlog
 from aiobotocore.session import get_session
 
 from ....application.ports.outbound import EventPublisher
+from ....infrastructure.logging import get_correlation_id
+
+logger = structlog.get_logger()
 
 
 class KinesisEventPublisher(EventPublisher):
@@ -21,9 +25,13 @@ class KinesisEventPublisher(EventPublisher):
         self._session = get_session()
 
     async def publish(self, event_type: str, payload: dict[str, Any]) -> None:
-        """Publish an event to Kinesis."""
+        """Publish an event to Kinesis with correlation ID for tracing."""
+        # Include correlation ID for distributed tracing
+        correlation_id = get_correlation_id()
+
         event = {
             "event_type": event_type,
+            "correlation_id": correlation_id,
             "payload": payload,
         }
 
@@ -37,3 +45,10 @@ class KinesisEventPublisher(EventPublisher):
                 Data=json.dumps(event).encode("utf-8"),
                 PartitionKey=payload.get("message_id", "default"),
             )
+
+        logger.debug(
+            "Event published to Kinesis",
+            event_type=event_type,
+            correlation_id=correlation_id,
+            message_id=payload.get("message_id"),
+        )

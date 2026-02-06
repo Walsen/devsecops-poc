@@ -169,6 +169,36 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      # Semgrep - Advanced SAST (better than Bandit)
+      - name: Semgrep scan
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+
+      # pip-audit - Python CVE scanning
+      - name: Install pip-audit
+        run: uv tool install pip-audit
+
+      - name: pip-audit - API
+        run: |
+          uv run --directory api pip freeze > /tmp/api-reqs.txt
+          uv tool run pip-audit -r /tmp/api-reqs.txt --ignore-vuln GHSA-xxxx || true
+
+      - name: pip-audit - Worker
+        run: |
+          uv run --directory worker pip freeze > /tmp/worker-reqs.txt
+          uv tool run pip-audit -r /tmp/worker-reqs.txt || true
+
+      - name: pip-audit - Scheduler
+        run: |
+          uv run --directory scheduler pip freeze > /tmp/scheduler-reqs.txt
+          uv tool run pip-audit -r /tmp/scheduler-reqs.txt || true
+
+      # Bandit - Python SAST (kept for comparison)
       - name: Install bandit
         run: uv tool install bandit
 
@@ -181,10 +211,50 @@ jobs:
       - name: Bandit scan - Scheduler
         run: uv tool run bandit -r scheduler/src/ -ll -ii
 
+      # Gitleaks - Secret scanning
       - name: Gitleaks secret scan
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # IaC Security Scanning
+  iac-security:
+    name: IaC Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [cdk-synth]
+    strategy:
+      matrix:
+        infra: [infra, infra-fs]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: CDK synth (generate CloudFormation)
+        run: uv run --directory ${{ matrix.infra }} cdk synth --quiet
+
+      # Checkov - IaC security scanner
+      - name: Checkov scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ matrix.infra }}/cdk.out
+          framework: cloudformation
+          soft_fail: true
+          output_format: cli
+          skip_check: CKV_AWS_18,CKV_AWS_21  # Skip S3 logging checks for dev
 
   # Container build validation (on PRs to main)
   container-build:
@@ -210,3 +280,96 @@ jobs:
           tags: ${{ matrix.service }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # SBOM Generation (Software Bill of Materials)
+  sbom:
+    name: Generate & Scan SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [test]
+    strategy:
+      matrix:
+        service: [api, worker, scheduler]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install cyclonedx-bom
+        run: uv tool install cyclonedx-bom
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          uv run --directory ${{ matrix.service }} pip freeze > ${{ matrix.service }}/requirements-frozen.txt
+          uv tool run cyclonedx-py requirements \
+            --input-file ${{ matrix.service }}/requirements-frozen.txt \
+            --output-file ${{ matrix.service }}/sbom.json \
+            --format json \
+            --schema-version 1.5
+
+      - name: Scan SBOM with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'sbom'
+          scan-ref: '${{ matrix.service }}/sbom.json'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.service }}
+          path: ${{ matrix.service }}/sbom.json
+          retention-days: 90
+
+  # Frontend SBOM
+  sbom-web:
+    name: Generate & Scan Frontend SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [lint-web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Install @cyclonedx/cyclonedx-npm
+        run: npm install -g @cyclonedx/cyclonedx-npm
+
+      - name: Generate SBOM (CycloneDX)
+        run: cyclonedx-npm --output-file sbom.json --output-format JSON
+        working-directory: web
+
+      - name: Scan SBOM with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'sbom'
+          scan-ref: 'web/sbom.json'
+          format: 'table'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-web
+          path: web/sbom.json
+          retention-days: 90

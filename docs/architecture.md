@@ -288,9 +288,9 @@ flowchart TB
     Security["SecurityStack<br/>KMS, WAF, Security Groups"]
     Auth["AuthStack<br/>Cognito, Identity Providers"]
     Data["DataStack<br/>RDS, S3, Kinesis"]
-    Compute["ComputeStack<br/>ECS, Fargate Services"]
+    Compute["ComputeStack<br/>ECS, Fargate Services<br/>Log Groups"]
     Edge["EdgeStack<br/>CloudFront, WAF Association"]
-    Monitoring["MonitoringStack<br/>GuardDuty, Security Hub"]
+    Monitoring["MonitoringStack<br/>GuardDuty, Security Hub<br/>Metric Filters, Alarms"]
 
     Network --> Security
     Network --> Data
@@ -299,8 +299,126 @@ flowchart TB
     Auth --> Compute
     Data --> Compute
     Compute --> Edge
+    Compute --> Monitoring
     Network --> Monitoring
     Security --> Monitoring
+```
+
+---
+
+## Observability & Monitoring
+
+### Enterprise Logging Architecture
+
+```mermaid
+flowchart TB
+    subgraph Services["ECS Services"]
+        API["API Service"]
+        Worker["Worker Service"]
+        Scheduler["Scheduler Service"]
+    end
+
+    subgraph Logging["CloudWatch Logs"]
+        API_LOG["/ecs/secure-api/api"]
+        WORKER_LOG["/ecs/secure-api/worker"]
+        SCHEDULER_LOG["/ecs/secure-api/scheduler"]
+    end
+
+    subgraph Metrics["CloudWatch Metrics"]
+        ERROR["ErrorCount"]
+        CRITICAL["CriticalCount"]
+        LATENCY["SlowOperations"]
+    end
+
+    subgraph Alarms["CloudWatch Alarms"]
+        ERROR_ALARM["Error Alarm<br/>≥10/5min"]
+        CRITICAL_ALARM["Critical Alarm<br/>≥1/min"]
+        LATENCY_ALARM["Latency Alarm<br/>p95 > 1s"]
+    end
+
+    SNS["SNS Topic<br/>Alerts"]
+
+    API -->|awslogs| API_LOG
+    Worker -->|awslogs| WORKER_LOG
+    Scheduler -->|awslogs| SCHEDULER_LOG
+
+    API_LOG -->|Metric Filter| ERROR
+    API_LOG -->|Metric Filter| CRITICAL
+    API_LOG -->|Metric Filter| LATENCY
+
+    WORKER_LOG -->|Metric Filter| ERROR
+    WORKER_LOG -->|Metric Filter| CRITICAL
+    WORKER_LOG -->|Metric Filter| LATENCY
+
+    ERROR --> ERROR_ALARM
+    CRITICAL --> CRITICAL_ALARM
+    LATENCY --> LATENCY_ALARM
+
+    ERROR_ALARM --> SNS
+    CRITICAL_ALARM --> SNS
+    LATENCY_ALARM --> SNS
+
+    style Logging fill:#e3f2fd
+    style Metrics fill:#fff3e0
+    style Alarms fill:#ffcdd2
+```
+
+### Distributed Tracing with Correlation IDs
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant Kinesis
+    participant Worker
+    participant CloudWatch
+
+    Client->>API: POST /messages<br/>X-Request-ID: abc-123
+    Note over API: Bind correlation_id to context
+    API->>CloudWatch: Log: "Message scheduled"<br/>correlation_id: abc-123
+    API->>Kinesis: {correlation_id: "abc-123", payload: {...}}
+    API-->>Client: 201 Created
+
+    Kinesis->>Worker: Consume event
+    Note over Worker: Extract & bind correlation_id
+    Worker->>CloudWatch: Log: "Processing started"<br/>correlation_id: abc-123
+    Worker->>Worker: Deliver to channels
+    Worker->>CloudWatch: Log: "Processing completed"<br/>correlation_id: abc-123
+```
+
+### Log Format (JSON Structured)
+
+```json
+{
+  "event": "Message processed",
+  "timestamp": "2026-02-05T19:45:32.456789Z",
+  "level": "info",
+  "logger": "worker.processor",
+  "service": "omnichannel-worker",
+  "correlation_id": "a1b2c3d4-e5f6-7890-abcd-ef1234567890",
+  "message_id": "msg-123",
+  "channels": ["facebook", "linkedin"],
+  "duration_ms": 245.67
+}
+```
+
+### CloudWatch Logs Insights Queries
+
+```sql
+-- Trace request across services by correlation ID
+fields @timestamp, service, event, message_id
+| filter correlation_id = "your-correlation-id"
+| sort @timestamp asc
+
+-- Error rate by service (hourly)
+fields service, level
+| filter level = "error"
+| stats count() by service, bin(1h)
+
+-- Slow operations (>500ms)
+fields @timestamp, service, event, duration_ms
+| filter duration_ms > 500
+| sort duration_ms desc
 ```
 
 ---
@@ -844,3 +962,107 @@ The worker selects between `DirectPublisher` and `AgentPublisher` based on confi
 - [Ports and Adapters Pattern](https://herbertograca.com/2017/09/14/ports-adapters-architecture/)
 - [Clean Architecture by Robert C. Martin](https://blog.cleancoder.com/uncle-bob/2012/08/13/the-clean-architecture.html)
 - [Strands Agents SDK](https://strandsagents.com/latest/)
+
+---
+
+## Hexagonal Architecture Compliance Audit
+
+### Audit Summary (February 2026)
+
+A comprehensive audit was performed to ensure all services follow hexagonal architecture principles.
+
+### Violations Found and Fixed
+
+```mermaid
+flowchart LR
+    subgraph Before["Before (Violations)"]
+        P1["MessageProcessor<br/>❌ Raw SQL queries"]
+        C1["KinesisConsumer<br/>❌ Direct infra import"]
+    end
+
+    subgraph After["After (Compliant)"]
+        P2["MessageProcessor<br/>✅ Uses MessageRepository port"]
+        C2["KinesisConsumer<br/>✅ Injected IdempotencyPort"]
+    end
+
+    P1 -->|Refactored| P2
+    C1 -->|Refactored| C2
+```
+
+### Changes Made
+
+| Component | Issue | Fix |
+|-----------|-------|-----|
+| `worker/src/processor.py` | Raw SQL queries in class | Created `MessageRepository` port, moved SQL to `SqlAlchemyMessageRepository` adapter |
+| `worker/src/consumer.py` | Direct import of `get_idempotency_service()` | Created `IdempotencyPort`, inject via constructor |
+| `worker/src/infrastructure/idempotency.py` | Class not implementing port | Renamed to `InMemoryIdempotencyService`, implements `IdempotencyPort` |
+| `worker/src/main.py` | No composition root | Added proper dependency wiring |
+
+### New Ports Added
+
+```mermaid
+classDiagram
+    class MessageRepository {
+        <<interface>>
+        +get_by_id(message_id: UUID) MessageData
+        +update_status(message_id: UUID, status: str)
+        +mark_channel_delivered(message_id: UUID, channel: str, external_id: str)
+        +mark_channel_failed(message_id: UUID, channel: str, error: str)
+    }
+
+    class IdempotencyPort {
+        <<interface>>
+        +generate_key(message_id: str, channels: list) str
+        +check_and_lock(key: str) IdempotencyRecord
+        +mark_completed(key: str, result: dict)
+        +mark_failed(key: str, error: str)
+    }
+
+    class SqlAlchemyMessageRepository {
+        -AsyncSession _session
+    }
+
+    class InMemoryIdempotencyService {
+        -dict _cache
+        -int _ttl_seconds
+    }
+
+    MessageRepository <|.. SqlAlchemyMessageRepository
+    IdempotencyPort <|.. InMemoryIdempotencyService
+```
+
+### Composition Root Pattern
+
+The `main.py` now serves as the composition root, wiring all dependencies:
+
+```python
+# worker/src/main.py - Composition Root
+async def main():
+    # Create infrastructure adapters
+    message_repository = SqlAlchemyMessageRepository(session)
+    publisher = create_publisher()  # DirectPublisher or AgentPublisher
+    idempotency = get_idempotency_service()
+
+    # Wire up application layer
+    processor = MessageProcessor(
+        message_repository=message_repository,
+        publisher=publisher,
+    )
+    
+    # Wire up driving adapter
+    consumer = KinesisConsumer(
+        processor=processor,
+        idempotency=idempotency,
+    )
+```
+
+### Compliance Checklist
+
+| Principle | API Service | Worker Service |
+|-----------|-------------|----------------|
+| Domain has no external dependencies | ✅ | ✅ |
+| Use cases depend only on ports | ✅ | ✅ |
+| Infrastructure implements ports | ✅ | ✅ |
+| Dependencies injected via constructor | ✅ | ✅ |
+| No raw SQL in application layer | ✅ | ✅ |
+| Composition root wires dependencies | ✅ | ✅ |

@@ -65,6 +65,28 @@ class ComputeStack(Stack):
             name="secure-api.local",
         )
 
+        # Create log groups for each service (exposed for monitoring stack)
+        self.api_log_group = logs.LogGroup(
+            self,
+            "ApiLogGroup",
+            log_group_name="/ecs/secure-api/api",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        self.worker_log_group = logs.LogGroup(
+            self,
+            "WorkerLogGroup",
+            log_group_name="/ecs/secure-api/worker",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        self.scheduler_log_group = logs.LogGroup(
+            self,
+            "SchedulerLogGroup",
+            log_group_name="/ecs/secure-api/scheduler",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
         # Application Load Balancer
         self.alb = elbv2.ApplicationLoadBalancer(
             self,
@@ -115,7 +137,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="api",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.api_log_group,
             ),
             environment={
                 **shared_environment,
@@ -156,7 +178,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="worker",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.worker_log_group,
             ),
             environment={
                 **shared_environment,
@@ -197,7 +219,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="scheduler",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.scheduler_log_group,
             ),
             environment={
                 **shared_environment,

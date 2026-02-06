@@ -6,23 +6,29 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 
 from .config import settings
 from .consumer import KinesisConsumer
+from .infrastructure.adapters import (
+    AgentPublisher,
+    DirectPublisher,
+    SqlAlchemyMessageRepository,
+)
+from .infrastructure.idempotency import get_idempotency_service
+from .infrastructure.logging import configure_logging
 from .processor import MessageProcessor
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-)
+# Configure enterprise logging
+configure_logging(settings.service_name)
 
 logger = structlog.get_logger()
+
+
+def create_publisher():
+    """Create the appropriate publisher based on configuration."""
+    if settings.use_ai_agent:
+        logger.info("Using AI Agent publisher for intelligent content adaptation")
+        return AgentPublisher()
+    else:
+        logger.info("Using Direct publisher for simple delivery")
+        return DirectPublisher()
 
 
 async def main() -> None:
@@ -34,8 +40,19 @@ async def main() -> None:
     session_factory = async_sessionmaker(engine, class_=AsyncSession)
 
     async with session_factory() as session:
-        processor = MessageProcessor(session)
-        consumer = KinesisConsumer(processor)
+        # Wire up dependencies (Composition Root)
+        message_repository = SqlAlchemyMessageRepository(session)
+        publisher = create_publisher()
+        idempotency = get_idempotency_service()
+
+        processor = MessageProcessor(
+            message_repository=message_repository,
+            publisher=publisher,
+        )
+        consumer = KinesisConsumer(
+            processor=processor,
+            idempotency=idempotency,
+        )
 
         # Handle shutdown signals
         loop = asyncio.get_event_loop()

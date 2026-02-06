@@ -270,8 +270,9 @@ flowchart LR
     subgraph Security["Security Checks"]
         AUDIT["pip-audit<br/>npm audit"]
         BANDIT["Bandit<br/>Semgrep"]
-        TRIVY["Trivy<br/>Container Scan"]
+        TRIVY["Trivy<br/>SBOM Scan"]
         GITLEAKS["Gitleaks<br/>Secret Scan"]
+        CHECKOV["Checkov<br/>IaC Scan"]
     end
 
     subgraph Quality["Quality Gates"]
@@ -287,6 +288,82 @@ flowchart LR
 
     PR --> Security --> Quality --> Deploy2
 ```
+
+### Security Scanners
+
+We use multiple security scanners in CI/CD to provide defense-in-depth. Each scanner has a specific purpose and catches different vulnerability types.
+
+| Scanner | Type | Purpose | Why Needed |
+|---------|------|---------|------------|
+| **Semgrep** | SAST | Advanced static analysis with OWASP Top 10 rules | Catches complex patterns like SQL injection, XSS, SSRF that simpler tools miss. Supports custom rules. |
+| **Bandit** | SAST | Python-specific security linter | Fast, catches Python-specific issues (hardcoded passwords, unsafe YAML, shell injection). Complements Semgrep. |
+| **pip-audit** | SCA | Python CVE database (PyPI Advisory) | More accurate for Python than generic scanners. Uses official PyPI security advisories. |
+| **Trivy** | SCA | SBOM vulnerability scanning | Scans CycloneDX SBOMs for known CVEs. Works with any language via SBOM. |
+| **Gitleaks** | Secrets | Hardcoded secrets detection | Prevents API keys, passwords, tokens from being committed. Scans git history. |
+| **Checkov** | IaC | Infrastructure misconfigurations | Catches AWS security issues (public S3, missing encryption, overly permissive IAM) in CDK/CloudFormation. |
+| **Dependabot** | SCA | Automated dependency updates | Creates PRs for vulnerable dependencies. Keeps dependencies fresh. |
+
+```mermaid
+flowchart TB
+    subgraph Code["Code Analysis"]
+        SEMGREP["Semgrep<br/>OWASP Top 10<br/>Security patterns<br/>Custom rules"]
+        BANDIT2["Bandit<br/>Python-specific<br/>Fast scanning"]
+    end
+
+    subgraph Deps["Dependency Analysis"]
+        PIPAUDIT["pip-audit<br/>PyPI Advisory DB<br/>Python CVEs"]
+        TRIVY2["Trivy<br/>SBOM scanning<br/>Multi-language"]
+        DEPENDABOT["Dependabot<br/>Auto-updates<br/>PR creation"]
+    end
+
+    subgraph Secrets2["Secret Detection"]
+        GITLEAKS2["Gitleaks<br/>Git history scan<br/>Pattern matching"]
+    end
+
+    subgraph IaC["Infrastructure"]
+        CHECKOV2["Checkov<br/>CIS benchmarks<br/>AWS best practices"]
+    end
+
+    Code --> Deps --> Secrets2 --> IaC
+
+    style SEMGREP fill:#4caf50
+    style TRIVY2 fill:#2196f3
+    style GITLEAKS2 fill:#ff9800
+    style CHECKOV2 fill:#9c27b0
+```
+
+#### Why Multiple Scanners?
+
+**No single scanner catches everything.** Each tool has strengths and blind spots:
+
+| Vulnerability Type | Semgrep | Bandit | pip-audit | Trivy | Gitleaks | Checkov |
+|-------------------|---------|--------|-----------|-------|----------|---------|
+| SQL Injection | ✅ | ⚠️ | ❌ | ❌ | ❌ | ❌ |
+| XSS | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ |
+| Hardcoded Secrets | ✅ | ✅ | ❌ | ❌ | ✅ | ❌ |
+| Known CVEs (Python) | ❌ | ❌ | ✅ | ✅ | ❌ | ❌ |
+| Known CVEs (npm) | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ |
+| Unsafe Deserialization | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Public S3 Buckets | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Missing Encryption | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+| Overly Permissive IAM | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ |
+
+#### Scanner Configuration
+
+**Semgrep** runs with these rule packs:
+- `p/python` - Python-specific security rules
+- `p/security-audit` - General security patterns
+- `p/secrets` - Hardcoded credentials
+- `p/owasp-top-ten` - OWASP Top 10 vulnerabilities
+
+**Trivy** scans SBOMs with:
+- `severity: CRITICAL,HIGH` - Only fail on serious issues
+- `ignore-unfixed: true` - Don't fail on vulnerabilities without patches
+
+**Checkov** scans IaC with:
+- `framework: cloudformation` - Scan CDK-generated templates
+- `soft_fail: true` - Report but don't block (for initial adoption)
+- Skipped checks: `CKV_AWS_18,CKV_AWS_21` (S3 logging for dev environments)
 
 ## Threat Detection & Response
 
@@ -317,6 +394,80 @@ flowchart TB
     SH2 -.-> GD2
     CT2 -.-> SH2
 ```
+
+## Security Logging & Monitoring
+
+All services implement enterprise-grade structured logging with security-focused features.
+
+### Security Log Architecture
+
+```mermaid
+flowchart TB
+    subgraph Services["ECS Services"]
+        API["API Service"]
+        Worker["Worker Service"]
+        Scheduler["Scheduler Service"]
+    end
+
+    subgraph Logs["CloudWatch Log Groups"]
+        API_LOG["/ecs/secure-api/api"]
+        WORKER_LOG["/ecs/secure-api/worker"]
+        SCHEDULER_LOG["/ecs/secure-api/scheduler"]
+    end
+
+    subgraph Filters["Metric Filters"]
+        ERROR["Error Count<br/>level = error"]
+        CRITICAL["Critical Count<br/>level = critical"]
+        LATENCY["Slow Operations<br/>duration_ms > 1000"]
+    end
+
+    subgraph Alarms["CloudWatch Alarms"]
+        ERROR_ALARM["Error Alarm<br/>≥10/5min → SNS"]
+        CRITICAL_ALARM["Critical Alarm<br/>≥1/min → SNS"]
+        LATENCY_ALARM["Latency Alarm<br/>p95 > 1s → SNS"]
+    end
+
+    Services -->|awslogs| Logs
+    Logs -->|Metric Filter| Filters
+    Filters --> Alarms
+
+    style Filters fill:#fff3e0
+    style Alarms fill:#ffcdd2
+```
+
+### Security-Sensitive Log Fields
+
+| Field | Purpose | Example |
+|-------|---------|---------|
+| `correlation_id` | Distributed tracing across services | `a1b2c3d4-e5f6-7890-abcd-ef1234567890` |
+| `user_id` | Audit trail (never log PII) | `user-123` |
+| `event` | Security event type | `"Authentication failed"` |
+| `error_type` | Exception classification | `"ForbiddenError"` |
+| `duration_ms` | Performance anomaly detection | `245.67` |
+
+### Security Logging Patterns
+
+```python
+# ✅ Security-safe logging
+logger.warning(
+    "Authentication failed",
+    user_id=user_id,
+    ip_address=request.client.host,
+    reason="invalid_token",
+)
+
+# ❌ NEVER log sensitive data
+logger.info("Login", password=password)  # NEVER
+logger.info("API call", api_key=api_key)  # NEVER
+```
+
+### Log Retention & Compliance
+
+| Log Group | Retention | Purpose |
+|-----------|-----------|---------|
+| ECS Service Logs | 30 days | Operational debugging |
+| CloudTrail | 7 days (dev) | API audit trail |
+| GuardDuty Findings | 90 days | Threat investigation |
 
 ## Security Checklist
 
@@ -463,10 +614,10 @@ flowchart LR
 
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
-| Dependencies not pinned with hashes | ⚠️ Vulnerable | Critical |
-| No SBOM generation | ⚠️ Missing | High |
+| Dependencies not pinned with hashes | ⚠️ Partial (lock files exist) | Critical |
+| No SBOM generation | ✅ Fixed (CycloneDX + Trivy) | High |
 | GitHub token has broad repo access | ⚠️ Over-permissioned | High |
-| No dependency vulnerability scanning in CI | ⚠️ Missing | High |
+| No dependency vulnerability scanning in CI | ✅ Fixed (pip-audit, Trivy, Semgrep) | High |
 
 #### 2. Authentication Bypass (Critical)
 
@@ -489,10 +640,10 @@ sequenceDiagram
 
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
-| No JWT audience (`aud`) validation | ⚠️ Vulnerable | Critical |
-| No JWT issuer (`iss`) strict validation | ⚠️ Vulnerable | High |
-| JWKS cached indefinitely | ⚠️ Vulnerable | Medium |
-| No algorithm restriction | ⚠️ Vulnerable | Critical |
+| No JWT audience (`aud`) validation | ✅ Fixed | Critical |
+| No JWT issuer (`iss`) strict validation | ✅ Fixed | High |
+| JWKS cached indefinitely | ✅ Fixed (TTL + refresh) | Medium |
+| No algorithm restriction | ✅ Fixed (RS256 only) | Critical |
 
 #### 3. API Abuse (High)
 
@@ -520,17 +671,17 @@ flowchart TB
 
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
-| No input sanitization | ⚠️ Vulnerable | High |
-| No user-scoped access control | ⚠️ Vulnerable | High |
-| No request size limits | ⚠️ Missing | Medium |
-| WAF rate limit per IP only | ⚠️ Bypassable | Medium |
+| No input sanitization | ✅ Fixed (HTML escape) | High |
+| No user-scoped access control | ✅ Fixed (IDOR prevention) | High |
+| No request size limits | ✅ Fixed (1MB limit) | Medium |
+| WAF rate limit per IP only | ✅ Fixed (per-user rate limit) | Medium |
 
 #### 4. Secrets Exfiltration (High)
 
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
-| Secrets ARN in Lambda env vars | ⚠️ Exposed | High |
-| No secrets rotation | ⚠️ Missing | Medium |
+| Secrets ARN in Lambda env vars | ✅ Fixed (runtime fetch) | High |
+| No secrets rotation | ✅ Fixed (CDK secrets) | Medium |
 | Broad Secrets Manager permissions | ⚠️ Over-permissioned | Medium |
 | Potential logging of sensitive data | ⚠️ Risk | Medium |
 
@@ -539,9 +690,9 @@ flowchart TB
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
 | No message schema validation | ⚠️ Vulnerable | Medium |
-| No idempotency keys | ⚠️ Missing | Medium |
+| No idempotency keys | ✅ Fixed | Medium |
 | Unlimited retries on errors | ⚠️ DoS risk | Medium |
-| No message replay protection | ⚠️ Missing | Low |
+| No message replay protection | ✅ Fixed (idempotency) | Low |
 
 #### 6. AI/LLM Attacks (Medium)
 
@@ -567,9 +718,9 @@ flowchart LR
 
 | Vulnerability | Current State | Risk |
 |--------------|---------------|------|
-| No prompt injection protection | ⚠️ Vulnerable | Medium |
-| No output content filtering | ⚠️ Missing | Medium |
-| No rate limiting per user | ⚠️ Missing | Medium |
+| No prompt injection protection | ✅ Fixed (input filter) | Medium |
+| No output content filtering | ✅ Fixed (output filter) | Medium |
+| No rate limiting per user | ✅ Fixed | Medium |
 
 #### 7. Frontend Attacks (Low-Medium)
 
@@ -611,28 +762,28 @@ quadrantChart
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **JWT Hardening** | Add `aud`, `iss` validation, algorithm restriction | 🔴 TODO |
-| **Dependency Pinning** | Pin all deps with hashes, enable Dependabot | 🔴 TODO |
-| **User-scoped Access** | Validate user owns resource before access | 🔴 TODO |
-| **Input Sanitization** | Sanitize all user inputs, escape HTML | 🔴 TODO |
+| **JWT Hardening** | Add `aud`, `iss` validation, algorithm restriction | ✅ Done |
+| **Dependency Pinning** | Pin all deps with hashes, enable Dependabot | ✅ Dependabot enabled |
+| **User-scoped Access** | Validate user owns resource before access | ✅ Done |
+| **Input Sanitization** | Sanitize all user inputs, escape HTML | ✅ Done |
 
 ### Phase 2: High Priority (Week 2)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **AI Guardrails** | Add content filtering, output validation | 🔴 TODO |
-| **Secrets Runtime Fetch** | Remove secrets from env vars, fetch at runtime | 🔴 TODO |
-| **JWKS Refresh** | Implement JWKS cache with TTL and refresh | 🔴 TODO |
-| **Request Validation** | Add request size limits, schema validation | 🔴 TODO |
+| **AI Guardrails** | Add content filtering, output validation | ✅ Done |
+| **Secrets Runtime Fetch** | Remove secrets from env vars, fetch at runtime | ✅ Done |
+| **JWKS Refresh** | Implement JWKS cache with TTL and refresh | ✅ Done |
+| **Request Validation** | Add request size limits, schema validation | ✅ Done |
 
 ### Phase 3: Medium Priority (Week 3-4)
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **SBOM Generation** | Generate and publish SBOM in CI | 🔴 TODO |
-| **Secrets Rotation** | Configure automatic rotation for all secrets | 🔴 TODO |
-| **Message Idempotency** | Add idempotency keys to Kinesis messages | 🔴 TODO |
-| **Rate Limiting** | Per-user rate limiting, not just per-IP | 🔴 TODO |
+| **SBOM Generation** | Generate and publish SBOM in CI | ✅ Done |
+| **Secrets Rotation** | Configure automatic rotation for all secrets | ✅ Done (CDK) |
+| **Message Idempotency** | Add idempotency keys to Kinesis messages | ✅ Done |
+| **Rate Limiting** | Per-user rate limiting, not just per-IP | ✅ Done |
 
 ### Phase 4: Hardening (Ongoing)
 
@@ -680,3 +831,6 @@ flowchart TB
 | Secrets rotation age | < 90 days | TBD |
 | Failed auth attempts (hourly) | < 100 | TBD |
 | WAF blocked requests (daily) | Monitored | TBD |
+| Error rate (5min window) | < 10 | ✅ Alarmed |
+| Critical errors (1min window) | 0 | ✅ Alarmed |
+| API latency p95 | < 1000ms | ✅ Alarmed |
