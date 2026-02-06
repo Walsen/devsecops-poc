@@ -152,28 +152,17 @@ flowchart TB
 
 The serverless architecture uses a single DynamoDB table with a flexible schema to store all entities.
 
-```mermaid
-erDiagram
-    MAIN_TABLE {
-        string PK
-        string SK
-        string GSI1PK
-        string GSI1SK
-        string GSI2PK
-        string GSI2SK
-        number ttl
-    }
-```
+**Table Schema:**
 
-| Attribute | Description |
-|-----------|-------------|
-| PK | Partition Key (e.g., `MSG#<id>`) |
-| SK | Sort Key (e.g., `METADATA`, `CHANNEL#facebook`) |
-| GSI1PK | User queries partition key |
-| GSI1SK | User queries sort key |
-| GSI2PK | Status queries partition key |
-| GSI2SK | Scheduled time for ordering |
-| ttl | Time to live for auto-expiration |
+| Attribute | Type | Description |
+|-----------|------|-------------|
+| PK | String | Partition Key (e.g., `MSG#<id>`) |
+| SK | String | Sort Key (e.g., `METADATA`, `CHANNEL#facebook`) |
+| GSI1PK | String | User queries partition key |
+| GSI1SK | String | User queries sort key |
+| GSI2PK | String | Status queries partition key |
+| GSI2SK | String | Scheduled time for ordering |
+| ttl | Number | Time to live for auto-expiration |
 
 #### Access Patterns
 
