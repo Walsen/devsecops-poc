@@ -9,6 +9,7 @@ from stacks.auth_stack import AuthStack
 from stacks.compute_stack import ComputeStack
 from stacks.monitoring_stack import MonitoringStack
 from stacks.edge_stack import EdgeStack
+from stacks.github_oidc_stack import GitHubOIDCStack
 
 app = cdk.App()
 
@@ -16,6 +17,19 @@ env = cdk.Environment(
     account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
     region=os.environ.get("CDK_DEFAULT_REGION", "us-east-1"),
 )
+
+# GitHub OIDC bootstrap (deploy separately with context vars)
+# Usage: cdk deploy GitHubOIDCStack -c github_org=YOUR_ORG -c github_repo=YOUR_REPO
+github_org = app.node.try_get_context("github_org")
+github_repo = app.node.try_get_context("github_repo")
+if github_org and github_repo:
+    GitHubOIDCStack(
+        app,
+        "GitHubOIDCStack",
+        env=env,
+        github_org=github_org,
+        github_repo=github_repo,
+    )
 
 # Network foundation
 network_stack = NetworkStack(app, "NetworkStack", env=env)

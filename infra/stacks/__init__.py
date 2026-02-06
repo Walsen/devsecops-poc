@@ -3,6 +3,7 @@ from .compute_stack import ComputeStack
 from .data_stack import DataStack
 from .edge_stack import EdgeStack
 from .frontend_stack import FrontendStack
+from .github_oidc_stack import GitHubOIDCStack
 from .monitoring_stack import MonitoringStack
 from .network_stack import NetworkStack
 from .security_stack import SecurityStack
@@ -13,6 +14,7 @@ __all__ = [
     "DataStack",
     "EdgeStack",
     "FrontendStack",
+    "GitHubOIDCStack",
     "MonitoringStack",
     "NetworkStack",
     "SecurityStack",
