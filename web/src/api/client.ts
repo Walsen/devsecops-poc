@@ -8,16 +8,69 @@ const api = axios.create({
   headers: {
     'Content-Type': 'application/json',
   },
+  // Security: Include cookies in requests for httpOnly token auth
+  withCredentials: true,
 });
 
-// Add auth token to requests
+// Security: CSRF token handling for state-changing requests
 api.interceptors.request.use((config) => {
-  const token = localStorage.getItem('accessToken');
-  if (token) {
-    config.headers.Authorization = `Bearer ${token}`;
+  // Get CSRF token from cookie (set by server)
+  const csrfToken = document.cookie
+    .split('; ')
+    .find(row => row.startsWith('csrf_token='))
+    ?.split('=')[1];
+  
+  if (csrfToken && ['POST', 'PUT', 'PATCH', 'DELETE'].includes(config.method?.toUpperCase() || '')) {
+    config.headers['X-CSRF-Token'] = csrfToken;
   }
+  
   return config;
 });
+
+// Handle 401 responses (session expired)
+api.interceptors.response.use(
+  (response) => response,
+  async (error) => {
+    if (error.response?.status === 401) {
+      // Session expired - redirect to login or refresh token
+      console.warn('Session expired, redirecting to login...');
+      // window.location.href = '/login';
+    }
+    return Promise.reject(error);
+  }
+);
+
+/**
+ * Set authentication session after Cognito login.
+ * 
+ * Security: Stores tokens in httpOnly cookies on the server,
+ * protecting them from XSS attacks.
+ */
+export async function setAuthSession(accessToken: string, refreshToken?: string): Promise<void> {
+  await api.post('/api/v1/auth/session', {
+    access_token: accessToken,
+    refresh_token: refreshToken,
+  });
+}
+
+/**
+ * Logout and clear session.
+ */
+export async function logout(): Promise<void> {
+  await api.post('/api/v1/auth/logout');
+}
+
+/**
+ * Check if user has an active session.
+ */
+export async function checkSession(): Promise<boolean> {
+  try {
+    const { data } = await api.get('/api/v1/auth/session');
+    return data.success;
+  } catch {
+    return false;
+  }
+}
 
 export async function submitCertification(
   submission: CertificationSubmission

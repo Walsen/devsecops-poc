@@ -9,6 +9,10 @@ class Settings(BaseSettings):
     service_namespace: str = "secure-api.local"
     debug: bool = False
 
+    # Security
+    secret_key: str = "change-me-in-production"  # noqa: S105 - Default for dev, override in prod
+    csrf_enabled: bool = True  # Disable for testing if needed
+
     # Database
     db_host: str = "localhost"
     db_port: int = 5432

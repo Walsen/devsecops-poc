@@ -78,6 +78,7 @@ flowchart TB
 - **Scheduled Messages**: Schedule announcements for future delivery
 - **Role-based Access**: Admin and Community Manager roles
 - **Zero Trust Security**: WAF, encryption, GuardDuty, Security Hub
+- **API Security Middleware**: CSRF protection, CSP headers, rate limiting, request validation
 - **Secure Supply Chain**: Signed containers, SBOM, vulnerability scanning
 - **Enterprise Observability**: Structured logging, distributed tracing, CloudWatch alarms
 
@@ -109,6 +110,7 @@ Polls the database for scheduled messages and publishes them to Kinesis when due
 
 - [Architecture](architecture.md) - Detailed system architecture, hexagonal patterns, and observability
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
+- [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
 - [AI Agents](ai-agents.md) - Using Bedrock Agents for intelligent posting
 

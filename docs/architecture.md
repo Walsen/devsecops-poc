@@ -233,6 +233,87 @@ flowchart TB
     Scheduler <-.-> CloudMap
 ```
 
+## API Security Middleware Stack
+
+The API service implements a comprehensive middleware stack for defense-in-depth security:
+
+```mermaid
+flowchart TB
+    subgraph Request["Incoming Request"]
+        REQ["HTTP Request"]
+    end
+
+    subgraph Middleware["Middleware Stack (Order of Execution)"]
+        direction TB
+        CORR["1. CorrelationIdMiddleware<br/>• Generates/extracts X-Request-ID<br/>• Enables distributed tracing"]
+        SEC["2. SecurityHeadersMiddleware<br/>• CSP, HSTS, X-Frame-Options<br/>• Permissions-Policy"]
+        SIZE["3. RequestSizeLimitMiddleware<br/>• 1MB payload limit<br/>• DoS prevention"]
+        RATE["4. RateLimitMiddleware<br/>• Per-user rate limiting<br/>• 60 requests/minute"]
+        CSRF["5. CSRFMiddleware<br/>• Double Submit Cookie<br/>• Signed tokens"]
+    end
+
+    subgraph App["Application"]
+        ROUTES["FastAPI Routes"]
+    end
+
+    REQ --> CORR --> SEC --> SIZE --> RATE --> CSRF --> ROUTES
+
+    style CORR fill:#e3f2fd
+    style SEC fill:#fff3e0
+    style SIZE fill:#ffcdd2
+    style RATE fill:#f3e5f5
+    style CSRF fill:#e8f5e9
+```
+
+### Middleware Details
+
+| Middleware | Purpose | Configuration |
+|------------|---------|---------------|
+| CorrelationIdMiddleware | Distributed tracing | Auto-generates UUID if missing |
+| SecurityHeadersMiddleware | Browser security | CSP, HSTS (1 year), X-Frame-Options: DENY |
+| RequestSizeLimitMiddleware | DoS prevention | 1MB max payload |
+| RateLimitMiddleware | Abuse prevention | 60 req/min per user |
+| CSRFMiddleware | CSRF protection | Double Submit Cookie, HMAC-signed tokens |
+
+### Security Headers Applied
+
+```mermaid
+flowchart LR
+    subgraph Headers["Response Headers"]
+        CSP["Content-Security-Policy<br/>default-src 'none'"]
+        HSTS["Strict-Transport-Security<br/>max-age=31536000"]
+        XFO["X-Frame-Options<br/>DENY"]
+        XCTO["X-Content-Type-Options<br/>nosniff"]
+        PP["Permissions-Policy<br/>camera=(), microphone=()"]
+        COOP["Cross-Origin-Opener-Policy<br/>same-origin"]
+    end
+```
+
+### CSRF Protection Flow
+
+```mermaid
+sequenceDiagram
+    participant Browser
+    participant API
+
+    Browser->>API: GET /page
+    API-->>Browser: Response + Set-Cookie: csrf_token=<signed_token>
+    
+    Note over Browser: JavaScript reads cookie
+    
+    Browser->>API: POST /api/data<br/>Cookie: csrf_token=<token><br/>X-CSRF-Token: <token>
+    
+    API->>API: Validate cookie == header
+    API->>API: Verify HMAC signature
+    API->>API: Check token expiration
+    
+    alt Valid Token
+        API-->>Browser: 200 OK + New csrf_token
+    else Invalid Token
+        API-->>Browser: 403 Forbidden
+    end
+```
+
 ## Data Flow
 
 ```mermaid

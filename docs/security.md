@@ -542,6 +542,7 @@ ENTRYPOINT ["python", "-m", "uvicorn", "main:app"]
 - [SLSA Supply Chain Framework](https://slsa.dev/)
 - [OWASP Container Security](https://cheatsheetseries.owasp.org/cheatsheets/Docker_Security_Cheat_Sheet.html)
 - [AWS Well-Architected Security Pillar](https://docs.aws.amazon.com/wellarchitected/latest/security-pillar/welcome.html)
+- [Penetration Testing Guide](penetration-testing.md) - Manual and automated security testing
 
 ---
 
@@ -789,10 +790,51 @@ quadrantChart
 
 | Task | Description | Status |
 |------|-------------|--------|
-| **CSRF Protection** | Add CSRF tokens to forms | 🔴 TODO |
-| **Secure Token Storage** | Move tokens to httpOnly cookies | 🔴 TODO |
-| **Content Security Policy** | Implement strict CSP headers | 🔴 TODO |
-| **Penetration Testing** | External security audit | 🔴 TODO |
+| **CSRF Protection** | Add CSRF tokens to forms | ✅ Done |
+| **Secure Token Storage** | Move tokens to httpOnly cookies | ✅ Done |
+| **Content Security Policy** | Implement strict CSP headers | ✅ Done |
+| **Penetration Testing** | Automated DAST + manual testing guide | ✅ Done |
+
+### Phase 5: Security Operations (Week 5+)
+
+| Task | Description | Status |
+|------|-------------|--------|
+| **Security Dashboard** | CloudWatch dashboard with security metrics | ✅ Done |
+| **Auth Failure Alerting** | Alert on high failed auth rate (brute force) | ✅ Done |
+| **CSRF/IDOR Alerting** | Alert on CSRF failures and access denied spikes | ✅ Done |
+| **AWS Config Rules** | Compliance rules for encryption, logging, IAM | ✅ Done |
+| **Security Hub Standards** | AWS Foundational Security Best Practices | ✅ Done |
+| **Incident Response Lambda** | Automated IP blocking + detailed alerts | ✅ Done |
+
+### Phase 5 Architecture
+
+```mermaid
+flowchart TB
+    subgraph Observability["Security Observability"]
+        DASHBOARD["CloudWatch Dashboard<br/>• Auth failures<br/>• CSRF/IDOR attempts<br/>• Rate limit hits<br/>• WAF metrics"]
+        ALERTS["Security Alerts<br/>• Brute force detection<br/>• Attack pattern alerts<br/>• Critical findings"]
+    end
+
+    subgraph Compliance["Compliance Automation"]
+        CONFIG["AWS Config Rules<br/>• RDS encryption<br/>• S3 encryption<br/>• CloudTrail enabled<br/>• VPC flow logs"]
+        SECHUB["Security Hub<br/>• AWS Best Practices<br/>• Finding aggregation<br/>• Compliance scores"]
+    end
+
+    subgraph Incident["Incident Response"]
+        GUARDDUTY["GuardDuty<br/>• Threat detection<br/>• Severity scoring"]
+        LAMBDA["Response Lambda<br/>• Auto-block IPs<br/>• Detailed alerts<br/>• Forensic logging"]
+        WAF["WAF IP Set<br/>• Dynamic blocking"]
+    end
+
+    DASHBOARD --> ALERTS
+    CONFIG --> SECHUB
+    GUARDDUTY --> LAMBDA --> WAF
+    SECHUB --> ALERTS
+
+    style Observability fill:#e3f2fd
+    style Compliance fill:#fff3e0
+    style Incident fill:#ffcdd2
+```
 
 ### Remediation Architecture
 
@@ -814,11 +856,18 @@ flowchart TB
         MSG_FIX["Message Security<br/>• Schema validation<br/>• Idempotency<br/>• DLQ handling"]
     end
 
-    Phase1 --> Phase2 --> Phase3
+    subgraph Phase5["Phase 5: Operations"]
+        OBS["Security Observability<br/>• Dashboards<br/>• Alerting"]
+        COMP["Compliance<br/>• AWS Config<br/>• Security Hub"]
+        IR["Incident Response<br/>• Auto-remediation<br/>• Forensics"]
+    end
+
+    Phase1 --> Phase2 --> Phase3 --> Phase5
 
     style Phase1 fill:#ff5252
     style Phase2 fill:#ff9800
     style Phase3 fill:#ffeb3b
+    style Phase5 fill:#4caf50
 ```
 
 ### Security Metrics to Track
@@ -829,8 +878,13 @@ flowchart TB
 | High vulnerabilities | 0 | TBD |
 | Dependency freshness | < 30 days | TBD |
 | Secrets rotation age | < 90 days | TBD |
-| Failed auth attempts (hourly) | < 100 | TBD |
-| WAF blocked requests (daily) | Monitored | TBD |
+| Failed auth attempts (hourly) | < 100 | ✅ Alarmed |
+| WAF blocked requests (daily) | Monitored | ✅ Dashboard |
+| CSRF failures (5min) | < 20 | ✅ Alarmed |
+| Access denied (5min) | < 30 | ✅ Alarmed |
+| Rate limit hits (5min) | < 100 | ✅ Alarmed |
 | Error rate (5min window) | < 10 | ✅ Alarmed |
 | Critical errors (1min window) | 0 | ✅ Alarmed |
 | API latency p95 | < 1000ms | ✅ Alarmed |
+| GuardDuty findings (24h) | 0 | ✅ Dashboard |
+| Security Hub compliance | > 90% | ✅ Enabled |

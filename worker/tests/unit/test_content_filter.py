@@ -1,6 +1,5 @@
 """Tests for content filter security guardrails."""
 
-import pytest
 
 from src.domain.ports.content_filter import ContentRisk, ViolationType
 from src.infrastructure.adapters.content_filter_impl import ContentFilterImpl

@@ -178,3 +178,137 @@ web-test:
 # Run frontend tests in watch mode
 web-test-watch:
     cd web && npm run test:watch
+
+# Security Scanning
+# Quick security scan (SAST + SCA)
+security-scan:
+    @echo "🔒 Running security scans..."
+    @echo ""
+    @echo "=== Semgrep (SAST) ==="
+    uv tool run semgrep scan --config p/owasp-top-ten --config p/security-audit api/src/ worker/src/ scheduler/src/ || true
+    @echo ""
+    @echo "=== Bandit (Python SAST) ==="
+    uv tool run bandit -r api/src/ worker/src/ scheduler/src/ -ll -ii || true
+    @echo ""
+    @echo "=== pip-audit (Python CVEs) ==="
+    @for service in api worker scheduler; do \
+        echo "Checking $$service..."; \
+        uv run --directory $$service pip freeze > /tmp/$$service-reqs.txt 2>/dev/null; \
+        uv tool run pip-audit -r /tmp/$$service-reqs.txt 2>/dev/null || true; \
+    done
+    @echo ""
+    @echo "=== Gitleaks (Secrets) ==="
+    gitleaks detect --source . --verbose || true
+    @echo ""
+    @echo "✅ Security scan complete"
+
+# Container security scan with Trivy
+trivy-scan:
+    @echo "🐳 Scanning containers with Trivy..."
+    @for service in api worker scheduler; do \
+        echo "=== Building and scanning $$service ==="; \
+        docker build -t $$service:scan ./$$service 2>/dev/null; \
+        trivy image --severity CRITICAL,HIGH $$service:scan || true; \
+    done
+
+# Generate and scan SBOMs
+sbom-scan:
+    @echo "📦 Generating and scanning SBOMs..."
+    @mkdir -p sbom-reports
+    @for service in api worker scheduler; do \
+        echo "=== $$service SBOM ==="; \
+        uv run --directory $$service pip freeze > /tmp/$$service-reqs.txt 2>/dev/null; \
+        uv tool run cyclonedx-py requirements \
+            --input-file /tmp/$$service-reqs.txt \
+            --output-file sbom-reports/$$service-sbom.json \
+            --format json 2>/dev/null || true; \
+        trivy sbom sbom-reports/$$service-sbom.json --severity CRITICAL,HIGH || true; \
+    done
+    @echo ""
+    @echo "=== Frontend SBOM ==="
+    cd web && npx @cyclonedx/cyclonedx-npm --output-file ../sbom-reports/web-sbom.json 2>/dev/null || true
+    trivy sbom sbom-reports/web-sbom.json --severity CRITICAL,HIGH || true
+    @echo ""
+    @echo "✅ SBOMs saved to sbom-reports/"
+
+# IaC security scan with Checkov
+iac-scan:
+    @echo "🏗️ Scanning infrastructure with Checkov..."
+    @echo "=== Synthesizing CDK ==="
+    uv run --directory infra cdk synth --quiet 2>/dev/null || true
+    @echo ""
+    @echo "=== Checkov scan ==="
+    uv tool run checkov -d infra/cdk.out --framework cloudformation --soft-fail || true
+
+# DAST scan with Nuclei (requires target URL)
+nuclei-scan target:
+    @echo "🎯 Running Nuclei scan against {{target}}..."
+    nuclei -u {{target}} \
+        -t cves/ \
+        -t vulnerabilities/ \
+        -t exposures/ \
+        -t misconfiguration/ \
+        -severity critical,high,medium \
+        -o nuclei-results.txt || true
+    @echo ""
+    @echo "✅ Results saved to nuclei-results.txt"
+
+# AWS security scan with Prowler
+prowler-scan:
+    @echo "☁️ Running Prowler AWS security scan..."
+    prowler aws \
+        --severity critical high \
+        --services ecs rds s3 iam kms secretsmanager cognito waf cloudfront \
+        --output-formats json html \
+        --output-directory prowler-results || true
+    @echo ""
+    @echo "✅ Results saved to prowler-results/"
+
+# Full penetration test suite
+pentest-full target="http://localhost:8000":
+    @echo "🔐 Running full penetration test suite..."
+    @echo "Target: {{target}}"
+    @echo ""
+    just security-scan
+    @echo ""
+    just trivy-scan
+    @echo ""
+    just sbom-scan
+    @echo ""
+    just iac-scan
+    @echo ""
+    @echo "=== Nuclei DAST Scan ==="
+    just nuclei-scan {{target}}
+    @echo ""
+    @echo "🎉 Full penetration test complete!"
+    @echo "Review results in:"
+    @echo "  - sbom-reports/"
+    @echo "  - nuclei-results.txt"
+    @echo "  - prowler-results/ (if AWS scan was run)"
+
+# JWT security test
+jwt-test token:
+    @echo "🔑 Testing JWT security..."
+    jwt_tool {{token}} -M at || true
+
+# Check security headers
+headers-check url:
+    @echo "📋 Checking security headers for {{url}}..."
+    @curl -sI {{url}} | grep -iE "^(content-security-policy|x-frame-options|x-content-type-options|strict-transport-security|permissions-policy|x-xss-protection|referrer-policy):" || echo "Some headers may be missing"
+
+# Install security tools
+security-tools-install:
+    @echo "🔧 Installing security tools..."
+    uv tool install semgrep
+    uv tool install bandit
+    uv tool install pip-audit
+    uv tool install cyclonedx-bom
+    uv tool install checkov
+    pip install prowler jwt_tool
+    @echo ""
+    @echo "For additional tools, install manually:"
+    @echo "  - Trivy: https://aquasecurity.github.io/trivy/latest/getting-started/installation/"
+    @echo "  - Nuclei: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"
+    @echo "  - Gitleaks: brew install gitleaks (or from GitHub releases)"
+    @echo ""
+    @echo "✅ Core security tools installed"

@@ -1,10 +1,11 @@
-import pytest
 from datetime import datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
+import pytest
+
 from src.application.services import GetMessageService
-from src.domain.entities import Message, MessageStatus
+from src.domain.entities import Message
 from src.domain.value_objects import ChannelType, MessageContent
 
 
@@ -33,9 +34,9 @@ class TestGetMessageService:
         self, service, mock_repository, sample_message
     ):
         mock_repository.get_by_id.return_value = sample_message
-        
+
         result = await service.execute(sample_message.id)
-        
+
         assert result is not None
         assert result.id == sample_message.id
         assert result.content == "Test message"
@@ -48,9 +49,9 @@ class TestGetMessageService:
         self, service, mock_repository
     ):
         mock_repository.get_by_id.return_value = None
-        
+
         result = await service.execute(uuid4())
-        
+
         assert result is None
 
     @pytest.mark.asyncio
@@ -58,9 +59,9 @@ class TestGetMessageService:
         self, service, mock_repository, sample_message
     ):
         mock_repository.get_by_id.return_value = sample_message
-        
+
         result = await service.execute(sample_message.id)
-        
+
         assert "whatsapp" in result.channels
         assert "email" in result.channels
 
@@ -72,16 +73,16 @@ class TestGetMessageService:
         sample_message.mark_processing()
         sample_message.mark_channel_delivered(ChannelType.WHATSAPP)
         mock_repository.get_by_id.return_value = sample_message
-        
+
         result = await service.execute(sample_message.id)
-        
+
         whatsapp_delivery = next(
             d for d in result.deliveries if d.channel == "whatsapp"
         )
         email_delivery = next(
             d for d in result.deliveries if d.channel == "email"
         )
-        
+
         assert whatsapp_delivery.status == "delivered"
         assert whatsapp_delivery.delivered_at is not None
         assert email_delivery.status == "scheduled"
@@ -100,7 +101,7 @@ class TestGetMessageService:
             recipient_id="user-456",
         )
         mock_repository.get_by_id.return_value = message
-        
+
         result = await service.execute(message.id)
-        
+
         assert result.media_url == "https://example.com/image.jpg"

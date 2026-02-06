@@ -67,26 +67,85 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
     """
-    Middleware to add security headers to responses.
+    Middleware to add comprehensive security headers to responses.
 
-    Security: Adds headers to prevent common web vulnerabilities.
+    Security: Adds headers to prevent common web vulnerabilities:
+    - XSS (Cross-Site Scripting)
+    - Clickjacking
+    - MIME sniffing
+    - Information disclosure
     """
+
+    # Content Security Policy for API
+    # Strict policy since this is an API, not serving HTML
+    CSP_API = "; ".join([
+        "default-src 'none'",
+        "frame-ancestors 'none'",
+        "base-uri 'none'",
+        "form-action 'none'",
+    ])
+
+    # Content Security Policy for docs (Swagger/ReDoc)
+    # More permissive to allow UI functionality
+    CSP_DOCS = "; ".join([
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+        "img-src 'self' data: https://cdn.jsdelivr.net",
+        "font-src 'self' https://cdn.jsdelivr.net",
+        "connect-src 'self'",
+        "frame-ancestors 'none'",
+        "base-uri 'self'",
+        "form-action 'self'",
+    ])
+
+    # Permissions Policy (formerly Feature-Policy)
+    PERMISSIONS_POLICY = ", ".join([
+        "accelerometer=()",
+        "camera=()",
+        "geolocation=()",
+        "gyroscope=()",
+        "magnetometer=()",
+        "microphone=()",
+        "payment=()",
+        "usb=()",
+    ])
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)
 
-        # Security headers
+        # Core security headers
         response.headers["X-Content-Type-Options"] = "nosniff"
         response.headers["X-Frame-Options"] = "DENY"
-        response.headers["X-XSS-Protection"] = "1; mode=block"
+        response.headers["X-XSS-Protection"] = "0"  # Disabled, CSP is better
         response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
 
-        # Content Security Policy for API responses
-        response.headers["Content-Security-Policy"] = "default-src 'none'; frame-ancestors 'none'"
+        # HSTS - enforce HTTPS (1 year, include subdomains)
+        response.headers["Strict-Transport-Security"] = (
+            "max-age=31536000; includeSubDomains; preload"
+        )
 
-        # Prevent caching of sensitive data
+        # Permissions Policy - disable unnecessary browser features
+        response.headers["Permissions-Policy"] = self.PERMISSIONS_POLICY
+
+        # Content Security Policy - different for API vs docs
+        if self._is_docs_path(request.url.path):
+            response.headers["Content-Security-Policy"] = self.CSP_DOCS
+        else:
+            response.headers["Content-Security-Policy"] = self.CSP_API
+
+        # Prevent caching of sensitive API data
         if request.url.path.startswith("/api/"):
             response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
             response.headers["Pragma"] = "no-cache"
+            response.headers["Expires"] = "0"
+
+        # Cross-Origin headers for API isolation
+        response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
+        response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
 
         return response
+
+    def _is_docs_path(self, path: str) -> bool:
+        """Check if path is for API documentation."""
+        return path in {"/docs", "/redoc", "/openapi.json"} or path.startswith("/docs")

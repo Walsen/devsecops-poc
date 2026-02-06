@@ -6,6 +6,7 @@ Security features:
 - Strict issuer validation
 - JWKS cache with TTL and forced refresh on key rotation
 - Token type validation (access vs id token)
+- Secure token storage via httpOnly cookies (XSS protection)
 """
 
 import time
@@ -14,7 +15,7 @@ from typing import Annotated, Any
 
 import httpx
 import structlog
-from fastapi import Depends, HTTPException, Request, status
+from fastapi import Depends, HTTPException, Request, Response, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from jose import JWTError, jwk, jwt
 
@@ -29,6 +30,12 @@ ALLOWED_ALGORITHMS = ["RS256"]
 
 # Security: Required claims that must be present
 REQUIRED_CLAIMS = ["sub", "exp", "iat", "iss"]
+
+# Security: Cookie configuration for secure token storage
+ACCESS_TOKEN_COOKIE = "access_token"  # noqa: S105
+REFRESH_TOKEN_COOKIE = "refresh_token"  # noqa: S105
+TOKEN_COOKIE_MAX_AGE = 3600  # 1 hour for access token
+REFRESH_COOKIE_MAX_AGE = 30 * 24 * 3600  # 30 days for refresh token
 
 
 @dataclass
@@ -255,11 +262,24 @@ async def get_current_user(
     request: Request,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(security)],
 ) -> AuthenticatedUser | None:
-    """
-    Dependency to get the current authenticated user.
+    """Dependency to get the current authenticated user.
+
+    Security: Supports two authentication methods:
+    1. Bearer token in Authorization header (for API clients)
+    2. httpOnly cookie (for browser clients - XSS protection)
+
     Returns None if no valid token is provided (for optional auth).
     """
-    if not credentials:
+    # Try to get token from Authorization header first
+    token: str | None = None
+
+    if credentials:
+        token = credentials.credentials
+    else:
+        # Security: Fall back to httpOnly cookie (XSS-safe)
+        token = request.cookies.get(ACCESS_TOKEN_COOKIE)
+
+    if not token:
         return None
 
     if not settings.auth_enabled:
@@ -271,7 +291,7 @@ async def get_current_user(
         )
 
     auth = get_auth_middleware()
-    claims = await auth.verify_token(credentials.credentials)
+    claims = await auth.verify_token(token)
 
     # Security: Validate sub claim is present and not empty
     sub = claims.get("sub")
@@ -337,3 +357,84 @@ def require_groups(*required_groups: str):
         return user
 
     return check_groups
+
+
+# =============================================================================
+# Secure Token Storage (httpOnly Cookies)
+# =============================================================================
+
+
+def set_auth_cookies(
+    response: Response,
+    access_token: str,
+    refresh_token: str | None = None,
+    secure: bool = True,
+) -> None:
+    """Set authentication tokens in httpOnly cookies.
+
+    Security features:
+    - httpOnly: Prevents JavaScript access (XSS protection)
+    - Secure: Only sent over HTTPS
+    - SameSite=Lax: CSRF protection while allowing navigation
+    - Path=/: Available to all routes
+
+    Args:
+        response: FastAPI Response object
+        access_token: JWT access token
+        refresh_token: Optional refresh token
+        secure: Set Secure flag (False for local development)
+    """
+    # Set access token cookie
+    response.set_cookie(
+        key=ACCESS_TOKEN_COOKIE,
+        value=access_token,
+        max_age=TOKEN_COOKIE_MAX_AGE,
+        httponly=True,  # Security: Not accessible via JavaScript
+        secure=secure,  # Security: HTTPS only in production
+        samesite="lax",  # Security: CSRF protection
+        path="/",
+    )
+
+    # Set refresh token cookie if provided
+    if refresh_token:
+        response.set_cookie(
+            key=REFRESH_TOKEN_COOKIE,
+            value=refresh_token,
+            max_age=REFRESH_COOKIE_MAX_AGE,
+            httponly=True,
+            secure=secure,
+            samesite="lax",
+            path="/",
+        )
+
+    logger.debug("Auth cookies set successfully")
+
+
+def clear_auth_cookies(response: Response) -> None:
+    """Clear authentication cookies (logout).
+
+    Security: Properly clears cookies by setting them to empty
+    with immediate expiration.
+    """
+    response.delete_cookie(
+        key=ACCESS_TOKEN_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+    response.delete_cookie(
+        key=REFRESH_TOKEN_COOKIE,
+        path="/",
+        httponly=True,
+        samesite="lax",
+    )
+
+    logger.debug("Auth cookies cleared")
+
+
+def get_refresh_token_from_cookie(request: Request) -> str | None:
+    """Get refresh token from httpOnly cookie.
+
+    Used for token refresh flow.
+    """
+    return request.cookies.get(REFRESH_TOKEN_COOKIE)
