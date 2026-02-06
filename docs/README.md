@@ -84,16 +84,16 @@ flowchart TB
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React/Next.js (planned) |
-| API | FastAPI (Python) |
-| Database | PostgreSQL (RDS) |
-| Queue | Kinesis Data Streams |
-| Auth | Cognito + Social Providers |
-| Infrastructure | AWS CDK (Python) |
-| Containers | ECS Fargate |
-| CI/CD | GitHub Actions |
+| Layer | Containers | Serverless |
+|-------|------------|------------|
+| Frontend | React (Amplify) | React (Amplify) |
+| API | FastAPI on ECS | FastAPI on Lambda |
+| Database | PostgreSQL (RDS) | DynamoDB |
+| Queue | Kinesis Data Streams | Kinesis Data Streams |
+| Auth | Cognito + Social | Cognito + Social |
+| Infrastructure | AWS CDK (Python) | AWS CDK (Python) |
+| Compute | ECS Fargate | Lambda |
+| CI/CD | GitHub Actions | GitHub Actions |
 
 ## Services
 
@@ -108,7 +108,8 @@ Polls the database for scheduled messages and publishes them to Kinesis when due
 
 ## Documentation
 
-- [Architecture](architecture.md) - Detailed system architecture, hexagonal patterns, and observability
+- [Architecture (Containers)](architecture-containers.md) - ECS Fargate deployment with PostgreSQL
+- [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
 - [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
