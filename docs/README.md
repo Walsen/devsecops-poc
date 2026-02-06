@@ -155,21 +155,61 @@ uv run cdk deploy --all
 
 ```
 .
-├── api/                    # API service (FastAPI)
+├── api/                    # API service (FastAPI + ECS)
 │   ├── src/
-│   │   ├── domain/         # Business entities
-│   │   ├── application/    # Use cases and ports
-│   │   ├── infrastructure/ # Adapters (DB, Kinesis)
-│   │   └── presentation/   # HTTP layer
-│   └── tests/
-├── worker/                 # Worker service (Kinesis consumer)
+│   │   ├── domain/         # Business entities, value objects
+│   │   ├── application/    # Use cases, ports, DTOs
+│   │   ├── infrastructure/ # Adapters (DB, Kinesis, Secrets)
+│   │   └── presentation/   # HTTP routes, middleware
+│   ├── tests/              # Unit tests
+│   └── alembic/            # Database migrations
+│
+├── api-lambda/             # API Lambda handler (serverless)
+│
+├── worker/                 # Worker service (Kinesis consumer + ECS)
+│   ├── src/
+│   │   ├── domain/         # Ports for channels, publishers
+│   │   ├── application/    # Delivery service
+│   │   ├── infrastructure/ # Publisher adapters (Direct, AI Agent)
+│   │   └── channels/       # Channel gateways (FB, IG, LI, Email, SMS)
+│   └── tests/              # Unit tests
+│
+├── worker-lambda/          # Worker Lambda handler (serverless)
+│
+├── scheduler/              # Scheduler service (cron + ECS)
+│   └── src/                # APScheduler, due message scanner
+│
+├── scheduler-lambda/       # Scheduler Lambda handler (serverless)
+│
+├── web/                    # Frontend (React + Vite + TypeScript)
 │   └── src/
-│       └── channels/       # Channel gateways
-├── scheduler/              # Scheduler service (cron)
-├── infra/                  # CDK infrastructure
-│   └── stacks/
+│       ├── components/     # React components
+│       ├── pages/          # Page components
+│       ├── api/            # API client
+│       └── types/          # TypeScript types
+│
+├── infra/                  # CDK infrastructure (containers)
+│   └── stacks/             # Network, Security, Auth, Data, Compute, Edge, Monitoring
+│
+├── infra-fs/               # CDK infrastructure (serverless)
+│   └── stacks/             # Data, Auth, API, Worker, Scheduler, Security, Frontend
+│
 ├── docs/                   # Documentation
-└── .github/                # CI/CD workflows
+│   ├── architecture-containers.md
+│   ├── architecture-serverless.md
+│   ├── security.md
+│   └── use-cases/
+│
+├── scripts/                # Utility scripts
+│   └── git-hooks/          # Pre-push hooks (lint, test)
+│
+├── .github/                # CI/CD
+│   └── workflows/          # GitHub Actions (security-scan)
+│
+├── devbox.json             # Development environment
+├── docker-compose.yml      # Local services (PostgreSQL, LocalStack)
+├── justfile                # Task runner commands
+└── ruff.toml               # Linter configuration
 ```
 
 ## License
