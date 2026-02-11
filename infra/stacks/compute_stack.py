@@ -122,6 +122,15 @@ class ComputeStack(Stack):
             "COGNITO_USER_POOL_ID": user_pool.user_pool_id,
             "COGNITO_CLIENT_ID": user_pool_client.user_pool_client_id,
             "COGNITO_REGION": self.region,
+            "DB_NAME": "postgres",
+        }
+
+        # Database secrets extracted from Secrets Manager (individual fields)
+        shared_secrets = {
+            "DB_HOST": ecs.Secret.from_secrets_manager(db_secret, "host"),
+            "DB_USER": ecs.Secret.from_secrets_manager(db_secret, "username"),
+            "DB_PASSWORD": ecs.Secret.from_secrets_manager(db_secret, "password"),
+            "DB_PORT": ecs.Secret.from_secrets_manager(db_secret, "port"),
         }
 
         # ============================================================
@@ -154,9 +163,7 @@ class ComputeStack(Stack):
                 **shared_environment,
                 "SERVICE_NAME": "api",
             },
-            secrets={
-                "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
-            },
+            secrets=shared_secrets,
         )
         api_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
@@ -198,9 +205,7 @@ class ComputeStack(Stack):
                 **shared_environment,
                 "SERVICE_NAME": "worker",
             },
-            secrets={
-                "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
-            },
+            secrets=shared_secrets,
         )
         worker_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
@@ -242,9 +247,7 @@ class ComputeStack(Stack):
                 **shared_environment,
                 "SERVICE_NAME": "scheduler",
             },
-            secrets={
-                "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
-            },
+            secrets=shared_secrets,
         )
         scheduler_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
