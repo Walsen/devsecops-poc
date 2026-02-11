@@ -135,6 +135,7 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 ## Use Cases
 
 - [AWS Certification Announcer](use-cases/aws-certification-announcer.md) - Primary use case
+- [Operational Notifications](use-cases/operational-notifications.md) - Dog-fooding CI/CD and monitoring alerts through the platform
 
 ## Getting Started
 
