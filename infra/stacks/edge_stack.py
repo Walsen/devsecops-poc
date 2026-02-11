@@ -42,9 +42,7 @@ class EdgeStack(Stack):
         # Read ALB DNS from context or CloudFormation export
         alb_dns = self.node.try_get_context("alb_dns")
         if not alb_dns:
-            alb_dns = Fn.import_value(
-                "ComputeStack:ExportsOutputFnGetAttAlb16C2F182DNSNameB67BDABC"
-            )
+            alb_dns = Fn.import_value("ComputeStack-AlbDnsName")
 
         # CLOUDFRONT-scoped IP set for blocking malicious IPs
         self.cloudfront_ip_set = wafv2.CfnIPSet(

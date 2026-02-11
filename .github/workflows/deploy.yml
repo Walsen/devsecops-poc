@@ -183,18 +183,16 @@ jobs:
         run: |
           uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk diff \
             --exclusively \
+            -c image_tag=${{ github.sha }} \
             ${{ steps.stacks.outputs.names }} \
             || true
-        env:
-          IMAGE_TAG: ${{ github.sha }}
 
       - name: CDK deploy
         run: |
           uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk deploy \
             --require-approval never \
+            -c image_tag=${{ github.sha }} \
             ${{ steps.stacks.outputs.names }}
-        env:
-          IMAGE_TAG: ${{ github.sha }}
 
   # Update ECS services (only for containers infra)
   deploy-services:
@@ -339,9 +337,9 @@ jobs:
 
       - name: Deploy EdgeStack
         run: |
-          uv run --directory infra cdk deploy EdgeStack --require-approval never
-        env:
-          IMAGE_TAG: ${{ github.sha }}
+          uv run --directory infra cdk deploy EdgeStack \
+            --require-approval never \
+            -c image_tag=${{ github.sha }}
 
   # Notify on completion
   notify:

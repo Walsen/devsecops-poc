@@ -1,4 +1,5 @@
 from aws_cdk import (
+    CfnOutput,
     Duration,
     Stack,
 )
@@ -132,9 +133,15 @@ class ComputeStack(Stack):
         event_stream.grant_write(api_task_def.task_role)  # API only writes events
         kms_key.grant_decrypt(api_task_def.task_role)
 
+        # Container image tag (from CI or default to latest)
+        image_tag = self.node.try_get_context("image_tag") or "latest"
+        account = Stack.of(self).account
+        region = Stack.of(self).region
+        ecr_base = f"{account}.dkr.ecr.{region}.amazonaws.com"
+
         api_container = api_task_def.add_container(
             "api",
-            image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
+            image=ecs.ContainerImage.from_registry(f"{ecr_base}/api:{image_tag}"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="api",
                 log_group=self.api_log_group,
@@ -147,7 +154,7 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        api_container.add_port_mappings(ecs.PortMapping(container_port=80))
+        api_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
         self.api_service = ecs.FargateService(
             self,
@@ -175,7 +182,7 @@ class ComputeStack(Stack):
 
         worker_container = worker_task_def.add_container(
             "worker",
-            image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
+            image=ecs.ContainerImage.from_registry(f"{ecr_base}/worker:{image_tag}"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="worker",
                 log_group=self.worker_log_group,
@@ -188,7 +195,7 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        worker_container.add_port_mappings(ecs.PortMapping(container_port=80))
+        worker_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
         self.worker_service = ecs.FargateService(
             self,
@@ -216,7 +223,7 @@ class ComputeStack(Stack):
 
         scheduler_container = scheduler_task_def.add_container(
             "scheduler",
-            image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
+            image=ecs.ContainerImage.from_registry(f"{ecr_base}/scheduler:{image_tag}"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="scheduler",
                 log_group=self.scheduler_log_group,
@@ -229,7 +236,7 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=80))
+        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=8080))
 
         self.scheduler_service = ecs.FargateService(
             self,
@@ -255,12 +262,20 @@ class ComputeStack(Stack):
 
         listener.add_targets(
             "ApiTarget",
-            port=80,
+            port=8080,
             targets=[self.api_service],
             health_check=elbv2.HealthCheck(
-                path="/",
+                path="/health",
                 interval=Duration.seconds(30),
             ),
+        )
+
+        # Export ALB DNS name for EdgeStack (CloudFront origin)
+        CfnOutput(
+            self,
+            "AlbDnsName",
+            value=self.alb.load_balancer_dns_name,
+            export_name="ComputeStack-AlbDnsName",
         )
 
     def _create_waf_web_acl(self) -> wafv2.CfnWebACL:
