@@ -537,7 +537,7 @@ jobs:
           echo "GHEOF" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
           payload: |
             {
@@ -589,7 +589,7 @@ jobs:
 
       - name: Send security findings detail
         if: steps.summary.outputs.security_failed == 'true'
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
           payload: |
             {
@@ -623,7 +623,7 @@ jobs:
     if: success() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Send Slack notification
-        uses: slackapi/slack-github-action@v1.26.0
+        uses: slackapi/slack-github-action@v2.1.1
         with:
           payload: |
             {
