@@ -13,13 +13,14 @@
   },
   "overrides": {
     "react": "$react",
-    "react-dom": "$react-dom"
+    "react-dom": "$react-dom",
+    "fast-xml-parser": "5.3.5"
   },
   "dependencies": {
     "@aws-amplify/ui-react": "^6.13.2",
     "@tanstack/react-query": "^5.90.20",
     "aws-amplify": "^6.16.0",
-    "axios": "^1.13.4",
+    "axios": "^1.13.5",
     "lucide-react": "^0.563.0",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
