@@ -478,7 +478,7 @@ jobs:
     name: Notify on Failure
     runs-on: ubuntu-latest
     needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
-    if: failure() && github.event_name == 'pull_request'
+    if: failure() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Download security findings
         uses: actions/download-artifact@v4
@@ -620,7 +620,7 @@ jobs:
     name: Notify on Success
     runs-on: ubuntu-latest
     needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
-    if: success() && github.event_name == 'pull_request'
+    if: success() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.26.0
