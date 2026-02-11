@@ -49,11 +49,48 @@ jobs:
             echo "infra_dir=infra" >> $GITHUB_OUTPUT
           fi
 
+  # Deploy ECR repositories (must exist before container builds)
+  deploy-registry:
+    name: Deploy Registry
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.infra_type == 'containers'
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: Deploy RegistryStack
+        run: |
+          uv run --directory infra cdk deploy RegistryStack \
+            --require-approval never
+
   # Build and push container images (only for containers infra)
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
-    needs: [setup]
+    needs: [setup, deploy-registry]
     if: needs.setup.outputs.infra_type == 'containers'
     permissions:
       id-token: write
@@ -310,14 +347,74 @@ jobs:
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [setup, deploy-cdk, deploy-services, migrate]
+    needs: [setup, build-and-push, deploy-cdk, deploy-services, migrate]
     if: always()
     steps:
+      - name: Determine deploy result
+        id: result
+        run: |
+          # Check all job results
+          BUILD="${{ needs.build-and-push.result }}"
+          CDK="${{ needs.deploy-cdk.result }}"
+          SERVICES="${{ needs.deploy-services.result }}"
+          MIGRATE="${{ needs.migrate.result }}"
+
+          if [ "$BUILD" = "failure" ] || [ "$CDK" = "failure" ] || \
+             [ "$SERVICES" = "failure" ] || [ "$MIGRATE" = "failure" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "text=Deploy Failed" >> $GITHUB_OUTPUT
+          elif [ "$CDK" = "skipped" ] && [ "$BUILD" = "failure" ]; then
+            echo "status=failure" >> $GITHUB_OUTPUT
+            echo "emoji=❌" >> $GITHUB_OUTPUT
+            echo "text=Deploy Failed (build step)" >> $GITHUB_OUTPUT
+          else
+            echo "status=success" >> $GITHUB_OUTPUT
+            echo "emoji=✅" >> $GITHUB_OUTPUT
+            echo "text=Deploy Succeeded" >> $GITHUB_OUTPUT
+          fi
+
       - name: Slack notification
-        uses: 8398a7/action-slack@v3
+        uses: slackapi/slack-github-action@v1.26.0
         with:
-          status: ${{ needs.deploy-cdk.result }}
-          fields: repo,message,commit,author,workflow
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "${{ steps.result.outputs.emoji }} ${{ steps.result.outputs.text }}",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.ref_name }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Infra:*\n${{ needs.setup.outputs.infra_type }}"},
+                    {"type": "mrkdwn", "text": "*Commit:*\n${{ github.sha }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-        if: env.SLACK_WEBHOOK_URL != ''
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+        if: ${{ secrets.SLACK_WEBHOOK_URL != '' }}

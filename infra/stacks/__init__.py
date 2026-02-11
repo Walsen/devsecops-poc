@@ -7,6 +7,7 @@ from .frontend_stack import FrontendStack
 from .github_oidc_stack import GitHubOIDCStack
 from .network_stack import NetworkStack
 from .observability_stack import ObservabilityStack
+from .registry_stack import RegistryStack
 from .security_stack import SecurityStack
 from .threat_detection_stack import ThreatDetectionStack
 
@@ -20,6 +21,7 @@ __all__ = [
     "GitHubOIDCStack",
     "NetworkStack",
     "ObservabilityStack",
+    "RegistryStack",
     "SecurityStack",
     "ThreatDetectionStack",
 ]
