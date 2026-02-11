@@ -218,10 +218,10 @@ sbom-scan:
     @for service in api worker scheduler; do \
         echo "=== $$service SBOM ==="; \
         uv run --directory $$service pip freeze > /tmp/$$service-reqs.txt 2>/dev/null; \
-        uv tool run cyclonedx-py requirements \
-            --input-file /tmp/$$service-reqs.txt \
-            --output-file sbom-reports/$$service-sbom.json \
-            --format json 2>/dev/null || true; \
+        uv tool run --from cyclonedx-bom cyclonedx-py requirements \
+            /tmp/$$service-reqs.txt \
+            -o sbom-reports/$$service-sbom.json \
+            --of json 2>/dev/null || true; \
         trivy sbom sbom-reports/$$service-sbom.json --severity CRITICAL,HIGH || true; \
     done
     @echo ""
