@@ -39,10 +39,11 @@ jobs:
     steps:
       - name: Set infrastructure type
         id: set-infra
+        env:
+          INFRA_TYPE_INPUT: ${{ inputs.infra_type || 'containers' }}
         run: |
-          INFRA_TYPE="${{ inputs.infra_type || 'containers' }}"
-          echo "infra_type=$INFRA_TYPE" >> $GITHUB_OUTPUT
-          if [ "$INFRA_TYPE" == "serverless" ]; then
+          echo "infra_type=$INFRA_TYPE_INPUT" >> $GITHUB_OUTPUT
+          if [ "$INFRA_TYPE_INPUT" == "serverless" ]; then
             echo "infra_dir=infra-fs" >> $GITHUB_OUTPUT
           else
             echo "infra_dir=infra" >> $GITHUB_OUTPUT
