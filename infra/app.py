@@ -1,18 +1,19 @@
 #!/usr/bin/env python3
 import os
+
 import aws_cdk as cdk
 
-from stacks.network_stack import NetworkStack
-from stacks.security_stack import SecurityStack
-from stacks.data_stack import DataStack
 from stacks.auth_stack import AuthStack
-from stacks.compute_stack import ComputeStack
-from stacks.observability_stack import ObservabilityStack
 from stacks.compliance_stack import ComplianceStack
-from stacks.threat_detection_stack import ThreatDetectionStack
+from stacks.compute_stack import ComputeStack
+from stacks.data_stack import DataStack
 from stacks.edge_stack import EdgeStack
 from stacks.github_oidc_stack import GitHubOIDCStack
+from stacks.network_stack import NetworkStack
+from stacks.observability_stack import ObservabilityStack
 from stacks.registry_stack import RegistryStack
+from stacks.security_stack import SecurityStack
+from stacks.threat_detection_stack import ThreatDetectionStack
 
 app = cdk.App()
 
@@ -26,8 +27,11 @@ github_org = app.node.try_get_context("github_org")
 github_repo = app.node.try_get_context("github_repo")
 if github_org and github_repo:
     GitHubOIDCStack(
-        app, "GitHubOIDCStack", env=env,
-        github_org=github_org, github_repo=github_repo,
+        app,
+        "GitHubOIDCStack",
+        env=env,
+        github_org=github_org,
+        github_repo=github_repo,
     )
 
 # --- Container registry (deployed before builds) ---
@@ -39,21 +43,27 @@ registry_stack = RegistryStack(app, "RegistryStack", env=env)
 network_stack = NetworkStack(app, "NetworkStack", env=env)
 
 security_stack = SecurityStack(
-    app, "SecurityStack", env=env,
+    app,
+    "SecurityStack",
+    env=env,
     vpc=network_stack.vpc,
 )
 
 auth_stack = AuthStack(app, "AuthStack", env=env)
 
 data_stack = DataStack(
-    app, "DataStack", env=env,
+    app,
+    "DataStack",
+    env=env,
     vpc=network_stack.vpc,
     kms_key=security_stack.kms_key,
     service_security_group=network_stack.service_security_group,
 )
 
 compute_stack = ComputeStack(
-    app, "ComputeStack", env=env,
+    app,
+    "ComputeStack",
+    env=env,
     vpc=network_stack.vpc,
     kms_key=security_stack.kms_key,
     db_secret=data_stack.db_secret,
@@ -62,12 +72,15 @@ compute_stack = ComputeStack(
     alb_security_group=network_stack.alb_security_group,
     user_pool=auth_stack.user_pool,
     user_pool_client=auth_stack.user_pool_client,
+    ecr_repositories=registry_stack.repositories,
 )
 
 # --- Monitoring (each stack is independent, can fail without affecting others) ---
 
 observability_stack = ObservabilityStack(
-    app, "ObservabilityStack", env=env,
+    app,
+    "ObservabilityStack",
+    env=env,
     api_log_group=compute_stack.api_log_group,
     worker_log_group=compute_stack.worker_log_group,
     scheduler_log_group=compute_stack.scheduler_log_group,
@@ -76,14 +89,17 @@ observability_stack = ObservabilityStack(
 compliance_stack = ComplianceStack(app, "ComplianceStack", env=env)
 
 threat_detection_stack = ThreatDetectionStack(
-    app, "ThreatDetectionStack", env=env,
+    app,
+    "ThreatDetectionStack",
+    env=env,
     waf_ip_set=security_stack.waf_ip_set,
 )
 
 # --- Edge (deployed independently, CloudFront takes 15-30 min) ---
 
 edge_stack = EdgeStack(
-    app, "EdgeStack",
+    app,
+    "EdgeStack",
     env=cdk.Environment(account=env.account, region="us-east-1"),
 )
 edge_stack.add_dependency(compute_stack)
