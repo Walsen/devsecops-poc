@@ -62,14 +62,10 @@ class KinesisConsumer:
             client_kwargs["endpoint_url"] = settings.aws_endpoint_url
 
         async with self._session.create_client("kinesis", **client_kwargs) as client:
-            stream_desc = await client.describe_stream(
-                StreamName=settings.kinesis_stream_name
-            )
+            stream_desc = await client.describe_stream(StreamName=settings.kinesis_stream_name)
             shards = stream_desc["StreamDescription"]["Shards"]
 
-            tasks = [
-                self._process_shard(client, shard["ShardId"]) for shard in shards
-            ]
+            tasks = [self._process_shard(client, shard["ShardId"]) for shard in shards]
             await asyncio.gather(*tasks)
 
     async def stop(self) -> None:

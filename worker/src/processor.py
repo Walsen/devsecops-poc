@@ -99,9 +99,7 @@ class MessageProcessor:
                     )
 
             # Update overall message status
-            success_count = sum(
-                1 for r in result.channel_results.values() if r.get("success")
-            )
+            success_count = sum(1 for r in result.channel_results.values() if r.get("success"))
             if success_count == len(channels):
                 await self._repository.update_status(UUID(message_id), "delivered")
             elif success_count > 0:

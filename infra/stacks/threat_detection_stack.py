@@ -30,13 +30,15 @@ class ThreatDetectionStack(Stack):
         super().__init__(scope, id, **kwargs)
 
         self.security_alerts_topic = sns.Topic(
-            self, "SecurityAlertsTopic",
+            self,
+            "SecurityAlertsTopic",
             display_name="Threat Detection Alerts",
         )
 
         # GuardDuty
         guardduty.CfnDetector(
-            self, "GuardDutyDetector",
+            self,
+            "GuardDutyDetector",
             enable=True,
             finding_publishing_frequency="FIFTEEN_MINUTES",
         )
@@ -46,7 +48,8 @@ class ThreatDetectionStack(Stack):
 
         # CloudTrail
         cloudtrail.Trail(
-            self, "AuditTrail",
+            self,
+            "AuditTrail",
             send_to_cloud_watch_logs=True,
             cloud_watch_logs_retention=logs.RetentionDays.ONE_WEEK,
             include_global_service_events=True,
@@ -139,7 +142,8 @@ def handler(event, context):
 """
 
         fn = lambda_.Function(
-            self, "IncidentResponseLambda",
+            self,
+            "IncidentResponseLambda",
             runtime=lambda_.Runtime.PYTHON_3_12,
             handler="index.handler",
             code=lambda_.Code.from_inline(lambda_code),
@@ -153,15 +157,18 @@ def handler(event, context):
             description="Auto-block malicious IPs from GuardDuty findings",
         )
 
-        fn.add_to_role_policy(iam.PolicyStatement(
-            actions=["wafv2:GetIPSet", "wafv2:UpdateIPSet"],
-            resources=[waf_ip_set.attr_arn],
-        ))
+        fn.add_to_role_policy(
+            iam.PolicyStatement(
+                actions=["wafv2:GetIPSet", "wafv2:UpdateIPSet"],
+                resources=[waf_ip_set.attr_arn],
+            )
+        )
         self.security_alerts_topic.grant_publish(fn)
 
         # GuardDuty findings -> Lambda
         guardduty_rule = events.Rule(
-            self, "GuardDutyRule",
+            self,
+            "GuardDutyRule",
             event_pattern=events.EventPattern(
                 source=["aws.guardduty"],
                 detail_type=["GuardDuty Finding"],
@@ -172,15 +179,18 @@ def handler(event, context):
 
         # Security Hub findings -> SNS
         events.Rule(
-            self, "SecurityHubRule",
+            self,
+            "SecurityHubRule",
             event_pattern=events.EventPattern(
                 source=["aws.securityhub"],
                 detail_type=["Security Hub Findings - Imported"],
                 detail={"findings": {"Severity": {"Label": ["CRITICAL", "HIGH"]}}},
             ),
-        ).add_target(targets.SnsTopic(
-            self.security_alerts_topic,
-            message=events.RuleTargetInput.from_text(
-                "Security Hub Critical/High Finding detected. Check Security Hub console."
-            ),
-        ))
+        ).add_target(
+            targets.SnsTopic(
+                self.security_alerts_topic,
+                message=events.RuleTargetInput.from_text(
+                    "Security Hub Critical/High Finding detected. Check Security Hub console."
+                ),
+            )
+        )

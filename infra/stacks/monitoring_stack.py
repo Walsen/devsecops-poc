@@ -129,7 +129,9 @@ class MonitoringStack(Stack):
             metric_namespace=namespace,
             metric_name=f"{service_name}ErrorCount",
             filter_pattern=logs.FilterPattern.string_value(
-                "$.level", "=", "error",
+                "$.level",
+                "=",
+                "error",
             ),
             metric_value="1",
         )
@@ -154,7 +156,9 @@ class MonitoringStack(Stack):
             metric_namespace=namespace,
             metric_name=f"{service_name}CriticalCount",
             filter_pattern=logs.FilterPattern.string_value(
-                "$.level", "=", "critical",
+                "$.level",
+                "=",
+                "critical",
             ),
             metric_value="1",
         )
@@ -231,9 +235,7 @@ class MonitoringStack(Stack):
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
         )
-        auth_failed_alarm.add_alarm_action(
-            cw_actions.SnsAction(self.security_alerts_topic)
-        )
+        auth_failed_alarm.add_alarm_action(cw_actions.SnsAction(self.security_alerts_topic))
 
         # CSRF token failures
         csrf_failed_filter = logs.MetricFilter(
@@ -242,9 +244,7 @@ class MonitoringStack(Stack):
             log_group=log_group,
             metric_namespace=namespace,
             metric_name="CSRFFailures",
-            filter_pattern=logs.FilterPattern.literal(
-                '?"CSRF token" ?"csrf_token"'
-            ),
+            filter_pattern=logs.FilterPattern.literal('?"CSRF token" ?"csrf_token"'),
             metric_value="1",
         )
 
@@ -296,9 +296,7 @@ class MonitoringStack(Stack):
             log_group=log_group,
             metric_namespace=namespace,
             metric_name="AccessDenied",
-            filter_pattern=logs.FilterPattern.literal(
-                '?"Access denied" ?"ForbiddenError"'
-            ),
+            filter_pattern=logs.FilterPattern.literal('?"Access denied" ?"ForbiddenError"'),
             metric_value="1",
         )
 
@@ -315,9 +313,7 @@ class MonitoringStack(Stack):
             comparison_operator=cloudwatch.ComparisonOperator.GREATER_THAN_OR_EQUAL_TO_THRESHOLD,
             treat_missing_data=cloudwatch.TreatMissingData.NOT_BREACHING,
         )
-        access_denied_alarm.add_alarm_action(
-            cw_actions.SnsAction(self.security_alerts_topic)
-        )
+        access_denied_alarm.add_alarm_action(cw_actions.SnsAction(self.security_alerts_topic))
 
     def _create_config_rules(self) -> None:
         """Create AWS Config rules for compliance monitoring."""
@@ -327,9 +323,7 @@ class MonitoringStack(Stack):
             "ConfigRole",
             assumed_by=iam.ServicePrincipal("config.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name(
-                    "service-role/AWS_ConfigRole"
-                ),
+                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWS_ConfigRole"),
             ],
         )
 
@@ -361,25 +355,41 @@ class MonitoringStack(Stack):
 
         # Config rules — all depend on the recorder being ready
         rules = [
-            ("EcsTaskNoPublicIp", "ECS_TASK_DEFINITION_NONROOT_USER",
-             "ECS task definitions should run as non-root user"),
-            ("RdsEncryptionEnabled", "RDS_STORAGE_ENCRYPTED",
-             "RDS instances should have encryption enabled"),
-            ("S3BucketEncryption", "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
-             "S3 buckets should have server-side encryption enabled"),
-            ("CloudTrailEnabled", "CLOUD_TRAIL_ENABLED",
-             "CloudTrail should be enabled"),
-            ("IamPasswordPolicy", "IAM_PASSWORD_POLICY",
-             "IAM password policy should meet requirements"),
-            ("VpcFlowLogsEnabled", "VPC_FLOW_LOGS_ENABLED",
-             "VPC flow logs should be enabled"),
-            ("SecretsManagerRotation", "SECRETSMANAGER_SCHEDULED_ROTATION_SUCCESS_CHECK",
-             "Secrets Manager secrets should have rotation configured"),
+            (
+                "EcsTaskNoPublicIp",
+                "ECS_TASK_DEFINITION_NONROOT_USER",
+                "ECS task definitions should run as non-root user",
+            ),
+            (
+                "RdsEncryptionEnabled",
+                "RDS_STORAGE_ENCRYPTED",
+                "RDS instances should have encryption enabled",
+            ),
+            (
+                "S3BucketEncryption",
+                "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+                "S3 buckets should have server-side encryption enabled",
+            ),
+            ("CloudTrailEnabled", "CLOUD_TRAIL_ENABLED", "CloudTrail should be enabled"),
+            (
+                "IamPasswordPolicy",
+                "IAM_PASSWORD_POLICY",
+                "IAM password policy should meet requirements",
+            ),
+            ("VpcFlowLogsEnabled", "VPC_FLOW_LOGS_ENABLED", "VPC flow logs should be enabled"),
+            (
+                "SecretsManagerRotation",
+                "SECRETSMANAGER_SCHEDULED_ROTATION_SUCCESS_CHECK",
+                "Secrets Manager secrets should have rotation configured",
+            ),
         ]
 
         for name, identifier, description in rules:
             rule = config.ManagedRule(
-                self, name, identifier=identifier, description=description,
+                self,
+                name,
+                identifier=identifier,
+                description=description,
             )
             rule.node.add_dependency(recorder)
 

@@ -29,6 +29,15 @@ run_service_checks() {
         return 1
     fi
     
+    # Format check with ruff
+    echo "  📝 Checking formatting..."
+    if uv run --directory "$service_dir" ruff format --check src/ 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Format passed${NC}"
+    else
+        echo -e "  ${RED}✗ Format failed (run: uv run --directory $service_dir ruff format src/)${NC}"
+        FAILED=1
+    fi
+
     # Lint with ruff
     echo "  📝 Linting..."
     if uv run --directory "$service_dir" ruff check src/ 2>/dev/null; then
@@ -66,6 +75,13 @@ run_service_checks "Worker" "worker"
 
 # Check scheduler (no tests yet)
 echo -e "\n${YELLOW}━━━ Checking Scheduler ━━━${NC}"
+echo "  📝 Checking formatting..."
+if uv run --directory scheduler ruff format --check src/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Format passed${NC}"
+else
+    echo -e "  ${RED}✗ Format failed (run: uv run --directory scheduler ruff format src/)${NC}"
+    FAILED=1
+fi
 echo "  📝 Linting..."
 if uv run --directory scheduler ruff check src/ 2>/dev/null; then
     echo -e "  ${GREEN}✓ Lint passed${NC}"
@@ -76,6 +92,13 @@ fi
 
 # Check infra CDK
 echo -e "\n${YELLOW}━━━ Checking Infrastructure ━━━${NC}"
+echo "  📝 Checking formatting..."
+if uv run --directory infra ruff format --check stacks/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Format passed${NC}"
+else
+    echo -e "  ${RED}✗ Format failed (run: uv run --directory infra ruff format stacks/)${NC}"
+    FAILED=1
+fi
 echo "  📝 Linting..."
 if uv run --directory infra ruff check stacks/ 2>/dev/null; then
     echo -e "  ${GREEN}✓ Lint passed${NC}"
