@@ -10,7 +10,7 @@ COPY pyproject.toml .
 RUN uv pip install --system --no-cache .
 
 # Production stage
-FROM gcr.io/distroless/python3-debian12
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -18,7 +18,8 @@ COPY --from=builder /usr/local/lib/python3.12/site-packages /usr/local/lib/pytho
 
 COPY src/ ./src/
 
-USER nonroot
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+USER appuser
 
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1

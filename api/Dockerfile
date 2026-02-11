@@ -12,8 +12,8 @@ COPY pyproject.toml .
 # Install dependencies
 RUN uv pip install --system --no-cache .
 
-# Production stage - distroless for security
-FROM gcr.io/distroless/python3-debian12
+# Production stage
+FROM python:3.12-slim
 
 WORKDIR /app
 
@@ -24,10 +24,10 @@ COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 # Copy application code
 COPY src/ ./src/
 
-# Non-root user (distroless default)
-USER nonroot
+# Create non-root user
+RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
+USER appuser
 
-# Don't write bytecode (read-only filesystem compatible)
 ENV PYTHONDONTWRITEBYTECODE=1
 ENV PYTHONUNBUFFERED=1
 
