@@ -544,6 +544,64 @@ If the OIDC provider already exists, either import it or skip the stack.
 
 **Fix**: The deploy workflow passes `image_tag` via `-c image_tag=${{ github.sha }}` to all CDK commands.
 
+### 7. CDK Auto-Generated Cross-Stack Exports Are Fragile (IMPORTANT)
+
+**Symptom**: `cdk deploy` fails with "Export X cannot be updated as it is in use by Y" or "No export named X found" after renaming a CDK construct.
+
+**Root cause**: When `app.py` passes CDK objects between stacks (e.g., `vpc=network_stack.vpc`), CDK auto-generates CloudFormation exports with hashed names like `NetworkStack:ExportsOutputRefSecureApiVpc257ECAA632D5AF2B`. The hash is derived from the construct path. If you rename a construct (e.g., `"SecureApiVpc"` → `"Vpc"`), the hash changes, the export name changes, and CloudFormation can't update because the old export is still referenced by consuming stacks.
+
+**Current auto-generated exports** (20 total):
+
+| Source Stack | Count | Examples |
+|---|---|---|
+| NetworkStack | 9 | VPC, 6 subnets, 2 security groups |
+| ComputeStack | 3 | 3 log groups (consumed by ObservabilityStack) |
+| DataStack | 3 | DB secret, Kinesis stream name + ARN |
+| AuthStack | 2 | User Pool, User Pool Client |
+| SecurityStack | 3 | KMS key ARN, WAF IP set ARN + ID |
+
+**Stable exports** (manually created with `export_name=`):
+
+| Export Name | Stack |
+|---|---|
+| `VpcId` | NetworkStack |
+| `PrivateSubnetIds` | NetworkStack |
+| `ServiceSecurityGroupId` | NetworkStack |
+| `SecureApiKmsKeyArn` | SecurityStack |
+| `SecureApiWafIpSetArn` | SecurityStack |
+| `ComputeStack-AlbDnsName` | ComputeStack |
+| `SecureApiDistributionDomain` | EdgeStack |
+| `OmnichannelUserPoolId` | AuthStack |
+| `OmnichannelUserPoolClientId` | AuthStack |
+| `OmnichannelUserPoolDomain` | AuthStack |
+| `OmnichannelCognitoRegion` | AuthStack |
+
+**Rules to avoid breaking auto-generated exports**:
+
+1. Never rename a CDK construct ID (the first string argument) in any stack that exports to other stacks
+2. Never change the logical structure of a construct that's passed between stacks
+3. If you must rename, you need to: delete the consuming stack first, deploy the exporting stack with the new name, then redeploy the consuming stack
+4. Alternatively, switch to explicit `CfnOutput` + `Fn.import_value()` with stable names (like we did for `ComputeStack-AlbDnsName`)
+
+**If it breaks**: The only recovery is to delete the consuming stack, deploy the exporting stack, then redeploy the consuming stack. For example, if you rename a construct in NetworkStack:
+
+```bash
+# Delete all stacks that import from NetworkStack
+uv run cdk destroy EdgeStack --force
+uv run cdk destroy ObservabilityStack --force
+uv run cdk destroy ComputeStack --force
+uv run cdk destroy DataStack --force
+
+# Now deploy NetworkStack with the new construct name
+uv run cdk deploy NetworkStack
+
+# Redeploy consuming stacks
+uv run cdk deploy DataStack
+uv run cdk deploy ComputeStack
+uv run cdk deploy ObservabilityStack
+uv run cdk deploy EdgeStack
+```
+
 ## Teardown Issues & Gotchas
 
 ### GuardDuty Detector — Account-Level Singleton
