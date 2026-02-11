@@ -193,7 +193,7 @@ security-scan:
     @echo "=== pip-audit (Python CVEs) ==="
     @for service in api worker scheduler; do \
         echo "Checking $$service..."; \
-        uv run --directory $$service pip freeze > /tmp/$$service-reqs.txt 2>/dev/null; \
+        uv export --directory $$service --no-hashes --no-dev --frozen > /tmp/$$service-reqs.txt 2>/dev/null; \
         uv tool run pip-audit -r /tmp/$$service-reqs.txt 2>/dev/null || true; \
     done
     @echo ""
@@ -217,7 +217,7 @@ sbom-scan:
     @mkdir -p sbom-reports
     @for service in api worker scheduler; do \
         echo "=== $$service SBOM ==="; \
-        uv run --directory $$service pip freeze > /tmp/$$service-reqs.txt 2>/dev/null; \
+        uv export --directory $$service --no-hashes --no-dev --frozen > /tmp/$$service-reqs.txt 2>/dev/null; \
         uv tool run --from cyclonedx-bom cyclonedx-py requirements \
             /tmp/$$service-reqs.txt \
             -o sbom-reports/$$service-sbom.json \

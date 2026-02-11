@@ -169,8 +169,13 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      - name: Init failure log
+        run: mkdir -p /tmp/security-output
+
       # Semgrep - Advanced SAST (better than Bandit)
       - name: Semgrep scan
+        id: semgrep
+        continue-on-error: true
         uses: semgrep/semgrep-action@v1
         with:
           config: >-
@@ -179,23 +184,27 @@ jobs:
             p/secrets
             p/owasp-top-ten
 
+      - name: Log Semgrep failure
+        if: steps.semgrep.outcome == 'failure'
+        run: echo "Semgrep SAST scan found issues (see job log for details)" >> /tmp/security-output/findings.txt
+
       # pip-audit - Python CVE scanning
       - name: Install pip-audit
         run: uv tool install pip-audit
 
       - name: pip-audit - API
         run: |
-          uv run --directory api pip freeze > /tmp/api-reqs.txt
+          uv export --directory api --no-hashes --no-dev --frozen > /tmp/api-reqs.txt
           uv tool run pip-audit -r /tmp/api-reqs.txt --ignore-vuln GHSA-xxxx || true
 
       - name: pip-audit - Worker
         run: |
-          uv run --directory worker pip freeze > /tmp/worker-reqs.txt
+          uv export --directory worker --no-hashes --no-dev --frozen > /tmp/worker-reqs.txt
           uv tool run pip-audit -r /tmp/worker-reqs.txt || true
 
       - name: pip-audit - Scheduler
         run: |
-          uv run --directory scheduler pip freeze > /tmp/scheduler-reqs.txt
+          uv export --directory scheduler --no-hashes --no-dev --frozen > /tmp/scheduler-reqs.txt
           uv tool run pip-audit -r /tmp/scheduler-reqs.txt || true
 
       # Bandit - Python SAST (kept for comparison)
@@ -203,19 +212,55 @@ jobs:
         run: uv tool install bandit
 
       - name: Bandit scan - API
-        run: uv tool run bandit -r api/src/ -ll -ii
+        id: bandit_api
+        continue-on-error: true
+        run: uv tool run bandit -r api/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-api.txt
 
       - name: Bandit scan - Worker
-        run: uv tool run bandit -r worker/src/ -ll -ii
+        id: bandit_worker
+        continue-on-error: true
+        run: uv tool run bandit -r worker/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-worker.txt
 
       - name: Bandit scan - Scheduler
-        run: uv tool run bandit -r scheduler/src/ -ll -ii
+        id: bandit_scheduler
+        continue-on-error: true
+        run: uv tool run bandit -r scheduler/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-scheduler.txt
+
+      - name: Log Bandit failures
+        if: steps.bandit_api.outcome == 'failure' || steps.bandit_worker.outcome == 'failure' || steps.bandit_scheduler.outcome == 'failure'
+        run: |
+          echo "Bandit SAST findings:" >> /tmp/security-output/findings.txt
+          for svc in api worker scheduler; do
+            if [ -s /tmp/security-output/bandit-$svc.txt ]; then
+              echo "--- $svc ---" >> /tmp/security-output/findings.txt
+              tail -20 /tmp/security-output/bandit-$svc.txt >> /tmp/security-output/findings.txt
+            fi
+          done
 
       # Gitleaks - Secret scanning
       - name: Gitleaks secret scan
+        id: gitleaks
+        continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log Gitleaks failure
+        if: steps.gitleaks.outcome == 'failure'
+        run: echo "Gitleaks found leaked secrets (see job log for details)" >> /tmp/security-output/findings.txt
+
+      - name: Upload security findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-findings
+          path: /tmp/security-output/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Fail if any scan failed
+        if: steps.semgrep.outcome == 'failure' || steps.bandit_api.outcome == 'failure' || steps.bandit_worker.outcome == 'failure' || steps.bandit_scheduler.outcome == 'failure' || steps.gitleaks.outcome == 'failure'
+        run: exit 1
 
   # IaC Security Scanning
   iac-security:
@@ -304,7 +349,7 @@ jobs:
 
       - name: Generate SBOM (CycloneDX)
         run: |
-          uv run --directory ${{ matrix.service }} pip freeze > ${{ matrix.service }}/requirements-frozen.txt
+          uv export --directory ${{ matrix.service }} --no-hashes --no-dev --frozen > ${{ matrix.service }}/requirements-frozen.txt
           uv tool run --from cyclonedx-bom cyclonedx-py requirements \
             ${{ matrix.service }}/requirements-frozen.txt \
             -o ${{ matrix.service }}/sbom.json \
@@ -312,14 +357,37 @@ jobs:
             --sv 1.5
 
       - name: Scan SBOM with Trivy
+        id: trivy
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'sbom'
           scan-ref: '${{ matrix.service }}/sbom.json'
           format: 'table'
+          output: '${{ matrix.service }}/trivy-results.txt'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+
+      - name: Show Trivy results
+        if: always()
+        run: cat ${{ matrix.service }}/trivy-results.txt 2>/dev/null || true
+
+      - name: Build findings summary
+        if: steps.trivy.outcome == 'failure'
+        run: |
+          mkdir -p /tmp/sbom-output
+          echo "Trivy SBOM scan (${{ matrix.service }}) - CRITICAL/HIGH vulnerabilities:" > /tmp/sbom-output/findings.txt
+          cat ${{ matrix.service }}/trivy-results.txt >> /tmp/sbom-output/findings.txt 2>/dev/null || true
+
+      - name: Upload SBOM findings
+        if: steps.trivy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-findings-${{ matrix.service }}
+          path: /tmp/sbom-output/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
@@ -328,6 +396,10 @@ jobs:
           name: sbom-${{ matrix.service }}
           path: ${{ matrix.service }}/sbom.json
           retention-days: 90
+
+      - name: Fail if vulnerabilities found
+        if: steps.trivy.outcome == 'failure'
+        run: exit 1
 
   # Frontend SBOM
   sbom-web:
@@ -357,14 +429,37 @@ jobs:
         working-directory: web
 
       - name: Scan SBOM with Trivy
+        id: trivy
+        continue-on-error: true
         uses: aquasecurity/trivy-action@master
         with:
           scan-type: 'sbom'
           scan-ref: 'web/sbom.json'
           format: 'table'
+          output: 'web/trivy-results.txt'
           exit-code: '1'
           severity: 'CRITICAL,HIGH'
           ignore-unfixed: true
+
+      - name: Show Trivy results
+        if: always()
+        run: cat web/trivy-results.txt 2>/dev/null || true
+
+      - name: Build findings summary
+        if: steps.trivy.outcome == 'failure'
+        run: |
+          mkdir -p /tmp/sbom-output
+          echo "Trivy SBOM scan (web) - CRITICAL/HIGH vulnerabilities:" > /tmp/sbom-output/findings.txt
+          cat web/trivy-results.txt >> /tmp/sbom-output/findings.txt 2>/dev/null || true
+
+      - name: Upload SBOM findings
+        if: steps.trivy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-findings-web
+          path: /tmp/sbom-output/
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload SBOM artifact
         uses: actions/upload-artifact@v4
@@ -374,6 +469,10 @@ jobs:
           path: web/sbom.json
           retention-days: 90
 
+      - name: Fail if vulnerabilities found
+        if: steps.trivy.outcome == 'failure'
+        run: exit 1
+
   # Slack notification on failure
   notify-failure:
     name: Notify on Failure
@@ -381,6 +480,55 @@ jobs:
     needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
     if: failure() && github.event_name == 'pull_request'
     steps:
+      - name: Download security findings
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-findings*'
+          path: /tmp/findings
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Build failure summary
+        id: summary
+        run: |
+          FAILED_JOBS=""
+          if [ "${{ needs.lint.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint"; fi
+          if [ "${{ needs.lint-web.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint Frontend"; fi
+          if [ "${{ needs.lint-infra.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint Infra"; fi
+          if [ "${{ needs.test.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Tests"; fi
+          if [ "${{ needs.cdk-synth.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• CDK Synth"; fi
+          if [ "${{ needs.security.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Security Scan"; fi
+          if [ "${{ needs.iac-security.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• IaC Security"; fi
+          if [ "${{ needs.container-build.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Container Build"; fi
+          if [ "${{ needs.sbom.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• SBOM Scan"; fi
+          if [ "${{ needs.sbom-web.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Frontend SBOM"; fi
+
+          # Collect security scan output (truncate to 2500 chars for Slack limit)
+          SCAN_OUTPUT=""
+          if [ -d /tmp/findings ]; then
+            SCAN_OUTPUT=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null | head -80 | cut -c1-120)
+            # Escape for JSON
+            SCAN_OUTPUT=$(echo "$SCAN_OUTPUT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g' | head -c 2500)
+          fi
+
+          echo "failed_jobs<<GHEOF" >> $GITHUB_OUTPUT
+          echo -e "$FAILED_JOBS" >> $GITHUB_OUTPUT
+          echo "GHEOF" >> $GITHUB_OUTPUT
+
+          echo "scan_output<<GHEOF" >> $GITHUB_OUTPUT
+          echo "$SCAN_OUTPUT" >> $GITHUB_OUTPUT
+          echo "GHEOF" >> $GITHUB_OUTPUT
+
+          # Check if any security job specifically failed
+          SEC_FAILED="false"
+          if [ "${{ needs.security.result }}" = "failure" ] || \
+             [ "${{ needs.sbom.result }}" = "failure" ] || \
+             [ "${{ needs.sbom-web.result }}" = "failure" ] || \
+             [ "${{ needs.iac-security.result }}" = "failure" ]; then
+            SEC_FAILED="true"
+          fi
+          echo "security_failed=$SEC_FAILED" >> $GITHUB_OUTPUT
+
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
@@ -410,6 +558,13 @@ jobs:
                   ]
                 },
                 {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Failed Jobs:*${{ steps.summary.outputs.failed_jobs }}"
+                  }
+                },
+                {
                   "type": "actions",
                   "elements": [
                     {
@@ -418,6 +573,34 @@ jobs:
                       "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
                     }
                   ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send security findings detail
+        if: steps.summary.outputs.security_failed == 'true' && steps.summary.outputs.scan_output != ''
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🔒 Security Scan Details",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "```${{ steps.summary.outputs.scan_output }}```"
+                  }
                 }
               ]
             }
