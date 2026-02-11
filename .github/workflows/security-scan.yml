@@ -117,7 +117,7 @@ jobs:
 
       - name: ZAP Baseline Scan
         if: ${{ inputs.scan_type == 'baseline' || inputs.scan_type == '' }}
-        uses: zaproxy/action-baseline@v0.12.0
+        uses: zaproxy/action-baseline@v0.15.0
         with:
           target: ${{ env.TARGET_URL }}
           rules_file_name: '.zap/rules.tsv'
@@ -127,7 +127,7 @@ jobs:
 
       - name: ZAP Full Scan
         if: ${{ inputs.scan_type == 'full' }}
-        uses: zaproxy/action-full-scan@v0.10.0
+        uses: zaproxy/action-full-scan@v0.13.0
         with:
           target: ${{ env.TARGET_URL }}
           rules_file_name: '.zap/rules.tsv'
@@ -136,7 +136,7 @@ jobs:
 
       - name: ZAP API Scan
         if: ${{ inputs.scan_type == 'api' }}
-        uses: zaproxy/action-api-scan@v0.7.0
+        uses: zaproxy/action-api-scan@v0.10.0
         with:
           target: ${{ env.TARGET_URL }}/openapi.json
           rules_file_name: '.zap/rules.tsv'
@@ -286,7 +286,7 @@ jobs:
     if: always()
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v7
         with:
           path: security-reports
 
