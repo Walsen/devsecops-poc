@@ -10,6 +10,9 @@ from aws_cdk import (
     aws_ec2 as ec2,
 )
 from aws_cdk import (
+    aws_ecr as ecr,
+)
+from aws_cdk import (
     aws_ecs as ecs,
 )
 from aws_cdk import (
@@ -46,6 +49,7 @@ class ComputeStack(Stack):
         alb_security_group: ec2.SecurityGroup,
         user_pool: cognito.UserPool,
         user_pool_client: cognito.UserPoolClient,
+        ecr_repositories: dict[str, ecr.Repository],
         **kwargs,
     ) -> None:
         super().__init__(scope, id, **kwargs)
@@ -135,13 +139,13 @@ class ComputeStack(Stack):
 
         # Container image tag (from CI or default to latest)
         image_tag = self.node.try_get_context("image_tag") or "latest"
-        account = Stack.of(self).account
-        region = Stack.of(self).region
-        ecr_base = f"{account}.dkr.ecr.{region}.amazonaws.com"
 
         api_container = api_task_def.add_container(
             "api",
-            image=ecs.ContainerImage.from_registry(f"{ecr_base}/api:{image_tag}"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                ecr_repositories["api"],
+                tag=image_tag,
+            ),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="api",
                 log_group=self.api_log_group,
@@ -182,7 +186,10 @@ class ComputeStack(Stack):
 
         worker_container = worker_task_def.add_container(
             "worker",
-            image=ecs.ContainerImage.from_registry(f"{ecr_base}/worker:{image_tag}"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                ecr_repositories["worker"],
+                tag=image_tag,
+            ),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="worker",
                 log_group=self.worker_log_group,
@@ -223,7 +230,10 @@ class ComputeStack(Stack):
 
         scheduler_container = scheduler_task_def.add_container(
             "scheduler",
-            image=ecs.ContainerImage.from_registry(f"{ecr_base}/scheduler:{image_tag}"),
+            image=ecs.ContainerImage.from_ecr_repository(
+                ecr_repositories["scheduler"],
+                tag=image_tag,
+            ),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="scheduler",
                 log_group=self.scheduler_log_group,
