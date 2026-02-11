@@ -176,7 +176,7 @@ jobs:
           if [ "${{ needs.setup.outputs.infra_type }}" == "serverless" ]; then
             echo "names=OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack" >> $GITHUB_OUTPUT
           else
-            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ThreatDetectionStack" >> $GITHUB_OUTPUT
+            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ComplianceStack ThreatDetectionStack" >> $GITHUB_OUTPUT
           fi
 
       - name: CDK diff
