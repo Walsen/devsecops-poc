@@ -491,33 +491,20 @@ jobs:
       - name: Build failure summary
         id: summary
         run: |
+          # Build failed jobs list (comma-separated, safe for JSON)
           FAILED_JOBS=""
-          if [ "${{ needs.lint.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint"; fi
-          if [ "${{ needs.lint-web.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint Frontend"; fi
-          if [ "${{ needs.lint-infra.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Lint Infra"; fi
-          if [ "${{ needs.test.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Tests"; fi
-          if [ "${{ needs.cdk-synth.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• CDK Synth"; fi
-          if [ "${{ needs.security.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Security Scan"; fi
-          if [ "${{ needs.iac-security.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• IaC Security"; fi
-          if [ "${{ needs.container-build.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Container Build"; fi
-          if [ "${{ needs.sbom.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• SBOM Scan"; fi
-          if [ "${{ needs.sbom-web.result }}" = "failure" ]; then FAILED_JOBS="$FAILED_JOBS\n• Frontend SBOM"; fi
-
-          # Collect security scan output (truncate to 2500 chars for Slack limit)
-          SCAN_OUTPUT=""
-          if [ -d /tmp/findings ]; then
-            SCAN_OUTPUT=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null | head -80 | cut -c1-120)
-            # Escape for JSON
-            SCAN_OUTPUT=$(echo "$SCAN_OUTPUT" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed ':a;N;$!ba;s/\n/\\n/g' | head -c 2500)
-          fi
-
-          echo "failed_jobs<<GHEOF" >> $GITHUB_OUTPUT
-          echo -e "$FAILED_JOBS" >> $GITHUB_OUTPUT
-          echo "GHEOF" >> $GITHUB_OUTPUT
-
-          echo "scan_output<<GHEOF" >> $GITHUB_OUTPUT
-          echo "$SCAN_OUTPUT" >> $GITHUB_OUTPUT
-          echo "GHEOF" >> $GITHUB_OUTPUT
+          if [ "${{ needs.lint.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint, "; fi
+          if [ "${{ needs.lint-web.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint Frontend, "; fi
+          if [ "${{ needs.lint-infra.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint Infra, "; fi
+          if [ "${{ needs.test.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Tests, "; fi
+          if [ "${{ needs.cdk-synth.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}CDK Synth, "; fi
+          if [ "${{ needs.security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Security Scan, "; fi
+          if [ "${{ needs.iac-security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}IaC Security, "; fi
+          if [ "${{ needs.container-build.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Container Build, "; fi
+          if [ "${{ needs.sbom.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}SBOM Scan, "; fi
+          if [ "${{ needs.sbom-web.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Frontend SBOM, "; fi
+          FAILED_JOBS="${FAILED_JOBS%, }"
+          echo "failed_jobs=${FAILED_JOBS}" >> $GITHUB_OUTPUT
 
           # Check if any security job specifically failed
           SEC_FAILED="false"
@@ -527,7 +514,25 @@ jobs:
              [ "${{ needs.iac-security.result }}" = "failure" ]; then
             SEC_FAILED="true"
           fi
-          echo "security_failed=$SEC_FAILED" >> $GITHUB_OUTPUT
+          echo "security_failed=${SEC_FAILED}" >> $GITHUB_OUTPUT
+
+      - name: Build scan output
+        id: scan_detail
+        if: steps.summary.outputs.security_failed == 'true'
+        run: |
+          SCAN_OUTPUT="No details captured"
+          if [ -d /tmp/findings ]; then
+            RAW=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null | head -60 | cut -c1-100)
+            if [ -n "$RAW" ]; then
+              # Escape backslashes, double quotes, and replace newlines with \n for JSON
+              SCAN_OUTPUT=$(printf '%s' "$RAW" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+            fi
+          fi
+          # Use heredoc for multiline-safe output
+          echo "scan_output<<GHEOF" >> $GITHUB_OUTPUT
+          printf '%s' "$SCAN_OUTPUT" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "GHEOF" >> $GITHUB_OUTPUT
 
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.26.0
@@ -561,7 +566,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "*Failed Jobs:*${{ steps.summary.outputs.failed_jobs }}"
+                    "text": "*Failed Jobs:* ${{ steps.summary.outputs.failed_jobs }}"
                   }
                 },
                 {
@@ -581,7 +586,7 @@ jobs:
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
       - name: Send security findings detail
-        if: steps.summary.outputs.security_failed == 'true' && steps.summary.outputs.scan_output != ''
+        if: steps.summary.outputs.security_failed == 'true'
         uses: slackapi/slack-github-action@v1.26.0
         with:
           payload: |
@@ -599,7 +604,7 @@ jobs:
                   "type": "section",
                   "text": {
                     "type": "mrkdwn",
-                    "text": "```${{ steps.summary.outputs.scan_output }}```"
+                    "text": "```${{ steps.scan_detail.outputs.scan_output }}```"
                   }
                 }
               ]
