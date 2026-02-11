@@ -2,7 +2,9 @@
   "mcpServers": {
     "aws-docs": {
       "command": "uvx",
-      "args": ["awslabs.aws-documentation-mcp-server@latest"],
+      "args": [
+        "awslabs.aws-documentation-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
@@ -11,7 +13,9 @@
     },
     "cdk": {
       "command": "uvx",
-      "args": ["awslabs.cdk-mcp-server@latest"],
+      "args": [
+        "awslabs.cdk-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },
@@ -20,7 +24,9 @@
     },
     "cloudwatch": {
       "command": "uvx",
-      "args": ["awslabs.cloudwatch-mcp-server@latest"],
+      "args": [
+        "awslabs.cloudwatch-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR",
         "AWS_PROFILE": "awscbba",
@@ -31,18 +37,27 @@
     },
     "aws-pricing": {
       "command": "uvx",
-      "args": ["awslabs.aws-pricing-mcp-server@latest"],
+      "args": [
+        "awslabs.aws-pricing-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR",
         "AWS_PROFILE": "awscbba",
         "AWS_REGION": "us-east-1"
       },
       "disabled": false,
-      "autoApprove": []
+      "autoApprove": [
+        "get_pricing_service_codes",
+        "get_pricing_service_attributes",
+        "get_pricing_attribute_values",
+        "get_pricing"
+      ]
     },
     "aws-diagram": {
       "command": "uvx",
-      "args": ["awslabs.aws-diagram-mcp-server@latest"],
+      "args": [
+        "awslabs.aws-diagram-mcp-server@latest"
+      ],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       },

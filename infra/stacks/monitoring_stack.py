@@ -11,6 +11,7 @@ Features:
 
 from aws_cdk import (
     Duration,
+    RemovalPolicy,
     Stack,
 )
 from aws_cdk import aws_cloudtrail as cloudtrail
@@ -24,6 +25,7 @@ from aws_cdk import aws_guardduty as guardduty
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_securityhub as securityhub
 from aws_cdk import aws_sns as sns
 from aws_cdk import aws_wafv2 as wafv2
@@ -79,18 +81,12 @@ class MonitoringStack(Stack):
             finding_publishing_frequency="FIFTEEN_MINUTES",
         )
 
-        # Security Hub with standards
+        # Security Hub (enable if not already active)
         self.security_hub = securityhub.CfnHub(self, "SecurityHub")
 
-        # Enable AWS Foundational Security Best Practices
-        securityhub.CfnStandard(
-            self,
-            "AWSFoundationalStandard",
-            standards_arn=(
-                f"arn:aws:securityhub:{self.region}::standards/"
-                "aws-foundational-security-best-practices/v/1.0.0"
-            ),
-        )
+        # Note: AWS Foundational Security Best Practices standard is
+        # auto-enabled by Security Hub. If it was previously enabled
+        # in this account, CDK will detect it as already existing.
 
         # CloudTrail
         self.audit_trail = cloudtrail.Trail(
@@ -132,7 +128,9 @@ class MonitoringStack(Stack):
             log_group=log_group,
             metric_namespace=namespace,
             metric_name=f"{service_name}ErrorCount",
-            filter_pattern=logs.FilterPattern.literal('"level": "error"'),
+            filter_pattern=logs.FilterPattern.string_value(
+                "$.level", "=", "error",
+            ),
             metric_value="1",
         )
 
@@ -155,7 +153,9 @@ class MonitoringStack(Stack):
             log_group=log_group,
             metric_namespace=namespace,
             metric_name=f"{service_name}CriticalCount",
-            filter_pattern=logs.FilterPattern.literal('"level": "critical"'),
+            filter_pattern=logs.FilterPattern.string_value(
+                "$.level", "=", "critical",
+            ),
             metric_value="1",
         )
 
@@ -333,7 +333,22 @@ class MonitoringStack(Stack):
             ],
         )
 
-        config.CfnConfigurationRecorder(
+        # S3 bucket for Config delivery channel (required before rules work)
+        config_bucket = s3.Bucket(
+            self,
+            "ConfigBucket",
+            removal_policy=RemovalPolicy.DESTROY,
+            auto_delete_objects=True,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+        )
+
+        delivery_channel = config.CfnDeliveryChannel(
+            self,
+            "ConfigDeliveryChannel",
+            s3_bucket_name=config_bucket.bucket_name,
+        )
+
+        recorder = config.CfnConfigurationRecorder(
             self,
             "ConfigRecorder",
             role_arn=config_role.role_arn,
@@ -342,62 +357,31 @@ class MonitoringStack(Stack):
                 include_global_resource_types=True,
             ),
         )
+        recorder.add_dependency(delivery_channel)
 
-        # Rule: ECS tasks should not have public IPs
-        config.ManagedRule(
-            self,
-            "EcsTaskNoPublicIp",
-            identifier="ECS_TASK_DEFINITION_NONROOT_USER",
-            description="ECS task definitions should run as non-root user",
-        )
+        # Config rules — all depend on the recorder being ready
+        rules = [
+            ("EcsTaskNoPublicIp", "ECS_TASK_DEFINITION_NONROOT_USER",
+             "ECS task definitions should run as non-root user"),
+            ("RdsEncryptionEnabled", "RDS_STORAGE_ENCRYPTED",
+             "RDS instances should have encryption enabled"),
+            ("S3BucketEncryption", "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
+             "S3 buckets should have server-side encryption enabled"),
+            ("CloudTrailEnabled", "CLOUD_TRAIL_ENABLED",
+             "CloudTrail should be enabled"),
+            ("IamPasswordPolicy", "IAM_PASSWORD_POLICY",
+             "IAM password policy should meet requirements"),
+            ("VpcFlowLogsEnabled", "VPC_FLOW_LOGS_ENABLED",
+             "VPC flow logs should be enabled"),
+            ("SecretsManagerRotation", "SECRETSMANAGER_SCHEDULED_ROTATION_SUCCESS_CHECK",
+             "Secrets Manager secrets should have rotation configured"),
+        ]
 
-        # Rule: RDS encryption enabled
-        config.ManagedRule(
-            self,
-            "RdsEncryptionEnabled",
-            identifier="RDS_STORAGE_ENCRYPTED",
-            description="RDS instances should have encryption enabled",
-        )
-
-        # Rule: S3 buckets should have encryption
-        config.ManagedRule(
-            self,
-            "S3BucketEncryption",
-            identifier="S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
-            description="S3 buckets should have server-side encryption enabled",
-        )
-
-        # Rule: CloudTrail enabled
-        config.ManagedRule(
-            self,
-            "CloudTrailEnabled",
-            identifier="CLOUD_TRAIL_ENABLED",
-            description="CloudTrail should be enabled",
-        )
-
-        # Rule: IAM password policy
-        config.ManagedRule(
-            self,
-            "IamPasswordPolicy",
-            identifier="IAM_PASSWORD_POLICY",
-            description="IAM password policy should meet requirements",
-        )
-
-        # Rule: VPC flow logs enabled
-        config.ManagedRule(
-            self,
-            "VpcFlowLogsEnabled",
-            identifier="VPC_FLOW_LOGS_ENABLED",
-            description="VPC flow logs should be enabled",
-        )
-
-        # Rule: Secrets Manager rotation
-        config.ManagedRule(
-            self,
-            "SecretsManagerRotation",
-            identifier="SECRETSMANAGER_SCHEDULED_ROTATION_SUCCESS_CHECK",
-            description="Secrets Manager secrets should have rotation configured",
-        )
+        for name, identifier, description in rules:
+            rule = config.ManagedRule(
+                self, name, identifier=identifier, description=description,
+            )
+            rule.node.add_dependency(recorder)
 
     def _create_incident_response_lambda(self, waf_ip_set: wafv2.CfnIPSet) -> None:
         """Create Lambda for automated incident response."""
@@ -811,9 +795,12 @@ Response Actions: {response_actions}
                 width=6,
                 height=4,
             ),
-            cloudwatch.AlarmStatusWidget(
-                title="Security Alarms Status",
-                alarms=[],  # Will be populated by alarm references
+            cloudwatch.TextWidget(
+                markdown=(
+                    "### Security Alarms\n"
+                    "Check the CloudWatch Alarms console "
+                    "for current alarm status."
+                ),
                 width=12,
                 height=4,
             ),

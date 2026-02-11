@@ -312,3 +312,62 @@ security-tools-install:
     @echo "  - Gitleaks: brew install gitleaks (or from GitHub releases)"
     @echo ""
     @echo "✅ Core security tools installed"
+
+# AWS Resource Management (Cost Saving)
+# Scale up ECS services and start RDS (when you need to test)
+aws-up:
+    @echo "🚀 Scaling up AWS resources..."
+    @echo "Starting RDS instance..."
+    aws rds start-db-instance --db-instance-identifier $( \
+        aws rds describe-db-instances --query "DBInstances[?TagList[?Key=='aws:cloudformation:stack-name' && Value=='DataStack']].DBInstanceIdentifier" --output text \
+    ) --no-cli-pager 2>/dev/null || echo "RDS already running or not found"
+    @echo "Scaling ECS services to 1..."
+    @CLUSTER=$$(aws ecs list-clusters --query "clusterArns[?contains(@, 'ComputeStack')]" --output text); \
+    if [ -n "$$CLUSTER" ]; then \
+        for svc in $$(aws ecs list-services --cluster $$CLUSTER --query "serviceArns[]" --output text); do \
+            echo "  Scaling $$svc"; \
+            aws ecs update-service --cluster $$CLUSTER --service $$svc --desired-count 1 --no-cli-pager > /dev/null; \
+        done; \
+    else \
+        echo "No ECS cluster found"; \
+    fi
+    @echo "✅ Resources scaling up (RDS may take 2-5 min)"
+
+# Scale down ECS services and stop RDS (when done testing)
+aws-down:
+    @echo "💤 Scaling down AWS resources..."
+    @echo "Scaling ECS services to 0..."
+    @CLUSTER=$$(aws ecs list-clusters --query "clusterArns[?contains(@, 'ComputeStack')]" --output text); \
+    if [ -n "$$CLUSTER" ]; then \
+        for svc in $$(aws ecs list-services --cluster $$CLUSTER --query "serviceArns[]" --output text); do \
+            echo "  Scaling down $$svc"; \
+            aws ecs update-service --cluster $$CLUSTER --service $$svc --desired-count 0 --no-cli-pager > /dev/null; \
+        done; \
+    else \
+        echo "No ECS cluster found"; \
+    fi
+    @echo "Stopping RDS instance..."
+    aws rds stop-db-instance --db-instance-identifier $( \
+        aws rds describe-db-instances --query "DBInstances[?TagList[?Key=='aws:cloudformation:stack-name' && Value=='DataStack']].DBInstanceIdentifier" --output text \
+    ) --no-cli-pager 2>/dev/null || echo "RDS already stopped or not found"
+    @echo "✅ Resources scaled down"
+
+# Check status of AWS resources
+aws-status:
+    @echo "📊 AWS Resource Status"
+    @echo ""
+    @echo "=== ECS Services ==="
+    @CLUSTER=$$(aws ecs list-clusters --query "clusterArns[?contains(@, 'ComputeStack')]" --output text 2>/dev/null); \
+    if [ -n "$$CLUSTER" ]; then \
+        aws ecs list-services --cluster $$CLUSTER --query "serviceArns[]" --output text | tr '\t' '\n' | while read svc; do \
+            STATUS=$$(aws ecs describe-services --cluster $$CLUSTER --services $$svc --query "services[0].{name:serviceName,desired:desiredCount,running:runningCount}" --output text); \
+            echo "  $$STATUS"; \
+        done; \
+    else \
+        echo "  No ECS cluster found"; \
+    fi
+    @echo ""
+    @echo "=== RDS ==="
+    @aws rds describe-db-instances \
+        --query "DBInstances[?TagList[?Key=='aws:cloudformation:stack-name' && Value=='DataStack']].{id:DBInstanceIdentifier,status:DBInstanceStatus,class:DBInstanceClass}" \
+        --output table 2>/dev/null || echo "  No RDS instance found"

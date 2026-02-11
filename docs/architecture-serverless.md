@@ -479,23 +479,28 @@ env:
 
 ## Migration Path
 
-### Containers → Serverless
+For a comprehensive guide on switching between deployment modes, including CI/CD integration, parallel running, and step-by-step migration instructions, see the [Dual-Mode Deployment Guide](dual-mode-deployment.md).
+
+### Quick Reference
+
+#### Containers → Serverless
 
 1. Export data from PostgreSQL to DynamoDB format
-2. Deploy serverless stacks
+2. Deploy serverless stacks (`infra_type: serverless` in CI/CD)
 3. Update DNS/CloudFront to point to new API Gateway
 4. Decommission ECS services
 
-### Serverless → Containers
+#### Serverless → Containers
 
 1. Export data from DynamoDB to PostgreSQL
-2. Deploy container stacks
+2. Deploy container stacks (`infra_type: containers` in CI/CD)
 3. Update DNS/CloudFront to point to ALB
 4. Delete Lambda functions and API Gateway
 
 ## References
 
-- [Container Architecture](architecture.md) - ECS Fargate deployment
+- [Container Architecture](architecture-containers.md) - ECS Fargate deployment
+- [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between modes
 - [Security Documentation](security.md) - Security practices
 - [DynamoDB Single-Table Design](https://www.alexdebrie.com/posts/dynamodb-single-table/)
 - [Lambda Power Tuning](https://github.com/alexcasalboni/aws-lambda-power-tuning)

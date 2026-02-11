@@ -147,14 +147,14 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        api_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        api_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.api_service = ecs.FargateService(
             self,
             "ApiService",
             cluster=self.cluster,
             task_definition=api_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="api"),
@@ -188,14 +188,14 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        worker_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        worker_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.worker_service = ecs.FargateService(
             self,
             "WorkerService",
             cluster=self.cluster,
             task_definition=worker_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="worker"),
@@ -207,7 +207,7 @@ class ComputeStack(Stack):
         scheduler_task_def = ecs.FargateTaskDefinition(
             self,
             "SchedulerTaskDef",
-            memory_limit_mib=256,
+            memory_limit_mib=512,
             cpu=256,
         )
         db_secret.grant_read(scheduler_task_def.task_role)
@@ -229,14 +229,14 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.scheduler_service = ecs.FargateService(
             self,
             "SchedulerService",
             cluster=self.cluster,
             task_definition=scheduler_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="scheduler"),
@@ -255,10 +255,10 @@ class ComputeStack(Stack):
 
         listener.add_targets(
             "ApiTarget",
-            port=8080,
+            port=80,
             targets=[self.api_service],
             health_check=elbv2.HealthCheck(
-                path="/health",
+                path="/",
                 interval=Duration.seconds(30),
             ),
         )

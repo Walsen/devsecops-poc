@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 """CDK App for Serverless Omnichannel Publisher infrastructure."""
 
+import os
+
 import aws_cdk as cdk
 
 from stacks import (
@@ -17,8 +19,8 @@ from stacks import (
 app = cdk.App()
 
 env = cdk.Environment(
-    account=app.node.try_get_context("account") or None,
-    region=app.node.try_get_context("region") or "us-east-1",
+    account=os.environ.get("CDK_DEFAULT_ACCOUNT"),
+    region=os.environ.get("CDK_DEFAULT_REGION", "us-east-1"),
 )
 
 # Data layer - DynamoDB, Kinesis, S3

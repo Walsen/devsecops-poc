@@ -106,10 +106,27 @@ Consumes messages from Kinesis and delivers them to the appropriate channels (Fa
 ### Scheduler Service
 Polls the database for scheduled messages and publishes them to Kinesis when due.
 
+## Dual-Mode Deployment
+
+The platform supports two deployment modes that can be switched at any time via a single CI/CD parameter:
+
+| | Containers (`infra/`) | Serverless (`infra-fs/`) |
+|---|---|---|
+| Compute | ECS Fargate | Lambda |
+| Database | PostgreSQL (RDS) | DynamoDB (Single-Table) |
+| API Gateway | ALB + CloudFront | API Gateway + CloudFront |
+| Scheduler | ECS Service (APScheduler) | EventBridge + Lambda |
+| Cost (low traffic) | ~$180-200/mo | ~$5-15/mo |
+
+Both modes share the same domain and application layers thanks to hexagonal architecture — only the infrastructure adapters change. The deploy workflow selects the mode via `infra_type` input (`containers` or `serverless`), routing to the corresponding CDK project. Stack names are fully independent, so both can coexist in the same AWS account during migration.
+
+See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration strategy.
+
 ## Documentation
 
 - [Architecture (Containers)](architecture-containers.md) - ECS Fargate deployment with PostgreSQL
 - [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
+- [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between containers and serverless
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
 - [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication

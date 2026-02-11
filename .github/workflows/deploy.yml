@@ -132,13 +132,29 @@ jobs:
       - name: Install CDK
         run: npm install -g aws-cdk
 
+      - name: Determine stack names
+        id: stacks
+        run: |
+          if [ "${{ needs.setup.outputs.infra_type }}" == "serverless" ]; then
+            echo "names=OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack" >> $GITHUB_OUTPUT
+          else
+            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ComplianceStack ThreatDetectionStack" >> $GITHUB_OUTPUT
+          fi
+
       - name: CDK diff
-        run: uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk diff --all || true
+        run: |
+          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk diff \
+            --exclusively \
+            ${{ steps.stacks.outputs.names }} \
+            || true
         env:
           IMAGE_TAG: ${{ github.sha }}
 
       - name: CDK deploy
-        run: uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk deploy --all --require-approval never
+        run: |
+          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk deploy \
+            --require-approval never \
+            ${{ steps.stacks.outputs.names }}
         env:
           IMAGE_TAG: ${{ github.sha }}
 
@@ -248,11 +264,52 @@ jobs:
             --network-configuration "awsvpcConfiguration={subnets=[${{ steps.network.outputs.subnets }}],securityGroups=[${{ steps.network.outputs.security_group }}],assignPublicIp=DISABLED}" \
             --no-cli-pager || echo "Migration task not configured yet"
 
+  # Deploy EdgeStack (CloudFront + WAF) - manual trigger only
+  # CloudFront takes 15-30 min to provision, so it's deployed separately
+  deploy-edge:
+    name: Deploy Edge (CloudFront + WAF)
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-cdk]
+    if: needs.setup.outputs.infra_type == 'containers' && github.event_name == 'workflow_dispatch'
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: Deploy EdgeStack
+        run: |
+          uv run --directory infra cdk deploy EdgeStack --require-approval never
+        env:
+          IMAGE_TAG: ${{ github.sha }}
+
   # Notify on completion
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [setup, deploy-cdk, migrate]
+    needs: [setup, deploy-cdk, deploy-services, migrate]
     if: always()
     steps:
       - name: Slack notification
