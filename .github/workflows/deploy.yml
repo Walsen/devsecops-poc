@@ -122,6 +122,7 @@ jobs:
           images: ${{ env.ECR_REGISTRY }}/${{ matrix.service }}
           tags: |
             type=sha,prefix=
+            type=raw,value=${{ github.sha }}
             type=raw,value=latest
 
       - name: Build and push
