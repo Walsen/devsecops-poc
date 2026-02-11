@@ -2,8 +2,10 @@
 Compliance Stack — AWS Config recorder, delivery channel, and managed rules.
 
 Standalone stack. No cross-stack dependencies.
-Delivery channel is created first, then recorder depends on it,
-then rules depend on the recorder.
+
+AWS Config ordering: recorder → delivery channel → start recording.
+The recorder must exist before the delivery channel can reference it.
+Managed rules depend on both.
 """
 
 from aws_cdk import RemovalPolicy, Stack
@@ -22,7 +24,9 @@ class ComplianceStack(Stack):
             "ConfigRole",
             assumed_by=iam.ServicePrincipal("config.amazonaws.com"),
             managed_policies=[
-                iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AWS_ConfigRole"),
+                iam.ManagedPolicy.from_aws_managed_policy_name(
+                    "service-role/AWS_ConfigRole",
+                ),
             ],
         )
 
@@ -34,14 +38,10 @@ class ComplianceStack(Stack):
             encryption=s3.BucketEncryption.S3_MANAGED,
         )
 
-        # Delivery channel FIRST (recorder needs it to start)
-        delivery_channel = config.CfnDeliveryChannel(
-            self,
-            "ConfigDeliveryChannel",
-            s3_bucket_name=config_bucket.bucket_name,
-        )
+        # Grant Config service write access to the bucket
+        config_bucket.grant_write(config_role)
 
-        # Recorder depends on delivery channel
+        # Recorder FIRST — delivery channel requires a recorder to exist
         recorder = config.CfnConfigurationRecorder(
             self,
             "ConfigRecorder",
@@ -51,9 +51,16 @@ class ComplianceStack(Stack):
                 include_global_resource_types=True,
             ),
         )
-        recorder.add_dependency(delivery_channel)
 
-        # Config rules depend on recorder
+        # Delivery channel depends on recorder
+        delivery_channel = config.CfnDeliveryChannel(
+            self,
+            "ConfigDeliveryChannel",
+            s3_bucket_name=config_bucket.bucket_name,
+        )
+        delivery_channel.add_dependency(recorder)
+
+        # Config rules depend on both recorder and delivery channel
         rules = [
             (
                 "RdsEncryptionEnabled",
@@ -65,13 +72,21 @@ class ComplianceStack(Stack):
                 "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED",
                 "S3 buckets should have server-side encryption enabled",
             ),
-            ("CloudTrailEnabled", "CLOUD_TRAIL_ENABLED", "CloudTrail should be enabled"),
+            (
+                "CloudTrailEnabled",
+                "CLOUD_TRAIL_ENABLED",
+                "CloudTrail should be enabled",
+            ),
             (
                 "IamPasswordPolicy",
                 "IAM_PASSWORD_POLICY",
                 "IAM password policy should meet requirements",
             ),
-            ("VpcFlowLogsEnabled", "VPC_FLOW_LOGS_ENABLED", "VPC flow logs should be enabled"),
+            (
+                "VpcFlowLogsEnabled",
+                "VPC_FLOW_LOGS_ENABLED",
+                "VPC flow logs should be enabled",
+            ),
         ]
 
         for name, identifier, description in rules:
@@ -82,3 +97,4 @@ class ComplianceStack(Stack):
                 description=description,
             )
             rule.node.add_dependency(recorder)
+            rule.node.add_dependency(delivery_channel)
