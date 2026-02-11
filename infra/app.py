@@ -12,6 +12,7 @@ from stacks.compliance_stack import ComplianceStack
 from stacks.threat_detection_stack import ThreatDetectionStack
 from stacks.edge_stack import EdgeStack
 from stacks.github_oidc_stack import GitHubOIDCStack
+from stacks.registry_stack import RegistryStack
 
 app = cdk.App()
 
@@ -28,6 +29,10 @@ if github_org and github_repo:
         app, "GitHubOIDCStack", env=env,
         github_org=github_org, github_repo=github_repo,
     )
+
+# --- Container registry (deployed before builds) ---
+
+registry_stack = RegistryStack(app, "RegistryStack", env=env)
 
 # --- Core infrastructure (deployed together) ---
 
