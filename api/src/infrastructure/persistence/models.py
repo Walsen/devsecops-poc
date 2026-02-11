@@ -15,6 +15,7 @@ class Base(DeclarativeBase):
 
 class MessageModel(Base):
     """SQLAlchemy model for Message entity."""
+
     __tablename__ = "messages"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
@@ -44,8 +45,7 @@ class MessageModel(Base):
             updated_at=message.updated_at,
         )
         model.deliveries = [
-            ChannelDeliveryModel.from_entity(d, message.id)
-            for d in message.deliveries
+            ChannelDeliveryModel.from_entity(d, message.id) for d in message.deliveries
         ]
         return model
 
@@ -68,6 +68,7 @@ class MessageModel(Base):
 
 class ChannelDeliveryModel(Base):
     """SQLAlchemy model for channel delivery tracking."""
+
     __tablename__ = "channel_deliveries"
 
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
@@ -98,3 +99,42 @@ class ChannelDeliveryModel(Base):
             delivered_at=self.delivered_at,
             error=self.error,
         )
+
+
+class CertificationSubmissionModel(Base):
+    """SQLAlchemy model for certification submissions."""
+
+    __tablename__ = "certification_submissions"
+
+    id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    member_name: Mapped[str] = mapped_column(String(100), nullable=False)
+    certification_type: Mapped[str] = mapped_column(String(50), nullable=False)
+    certification_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    photo_url: Mapped[str | None] = mapped_column(String(2048))
+    linkedin_url: Mapped[str | None] = mapped_column(String(2048))
+    personal_message: Mapped[str | None] = mapped_column(String(280))
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+
+    deliveries: Mapped[list["CertificationDeliveryModel"]] = relationship(
+        back_populates="submission", cascade="all, delete-orphan"
+    )
+
+
+class CertificationDeliveryModel(Base):
+    """SQLAlchemy model for certification delivery tracking."""
+
+    __tablename__ = "certification_deliveries"
+
+    id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
+    submission_id: Mapped[UUID] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("certification_submissions.id"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(50), nullable=False)
+    status: Mapped[str] = mapped_column(String(50), nullable=False)
+    external_post_id: Mapped[str | None] = mapped_column(String(255))
+    error: Mapped[str | None] = mapped_column(Text)
+    delivered_at: Mapped[datetime | None] = mapped_column(DateTime)
+
+    submission: Mapped["CertificationSubmissionModel"] = relationship(back_populates="deliveries")

@@ -1,8 +1,8 @@
-import pytest
 from datetime import datetime, timedelta
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 from uuid import UUID
 
+import pytest
 from pydantic import ValidationError
 
 from src.application.dtos import CreateMessageDTO
@@ -48,10 +48,10 @@ class TestScheduleMessageService:
         self, service, valid_dto, mock_repository
     ):
         result = await service.execute(valid_dto)
-        
+
         assert isinstance(result, UUID)
         mock_repository.save.assert_called_once()
-        
+
         saved_message = mock_repository.save.call_args[0][0]
         assert isinstance(saved_message, Message)
         assert saved_message.status == MessageStatus.SCHEDULED
@@ -61,7 +61,7 @@ class TestScheduleMessageService:
         self, service, valid_dto, mock_unit_of_work
     ):
         await service.execute(valid_dto)
-        
+
         mock_unit_of_work.commit.assert_called_once()
 
     @pytest.mark.asyncio
@@ -69,10 +69,10 @@ class TestScheduleMessageService:
         self, service, valid_dto, mock_event_publisher
     ):
         result = await service.execute(valid_dto)
-        
+
         mock_event_publisher.publish.assert_called_once()
         call_args = mock_event_publisher.publish.call_args
-        
+
         assert call_args[1]["event_type"] == "message.scheduled"
         assert call_args[1]["payload"]["message_id"] == str(result)
         assert call_args[1]["payload"]["channels"] == ["whatsapp", "email"]
@@ -88,9 +88,9 @@ class TestScheduleMessageService:
             scheduled_at=datetime.utcnow() + timedelta(hours=1),
             recipient_id="user-456",
         )
-        
+
         await service.execute(dto)
-        
+
         saved_message = mock_repository.save.call_args[0][0]
         assert saved_message.content.media_url == "https://example.com/image.jpg"
 
@@ -102,8 +102,8 @@ class TestScheduleMessageService:
             scheduled_at=datetime.utcnow() + timedelta(hours=1),
             recipient_id="user-123",
         )
-        
-        with pytest.raises(ValueError):
+
+        with pytest.raises(ValueError, match="invalid_channel"):
             await service.execute(dto)
 
     @pytest.mark.asyncio

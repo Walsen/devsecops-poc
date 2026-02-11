@@ -1,8 +1,8 @@
-import pytest
 from datetime import datetime, timedelta
-from uuid import uuid4
 
-from src.domain.entities import Message, MessageStatus
+import pytest
+
+from src.domain.entities import Message
 from src.domain.value_objects import ChannelType, MessageContent
 
 

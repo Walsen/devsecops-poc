@@ -8,6 +8,7 @@ on:
 
 env:
   PYTHON_VERSION: "3.12"
+  NODE_VERSION: "20"
 
 jobs:
   # Lint and type check
@@ -27,15 +28,44 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
-        run: uv run --directory ${{ matrix.service }} ruff check src/
+        run: uv run --directory ${{ matrix.service }} --extra dev ruff check src/
 
       - name: Ruff format check
-        run: uv run --directory ${{ matrix.service }} ruff format --check src/
+        run: uv run --directory ${{ matrix.service }} --extra dev ruff format --check src/
+
+  # Frontend lint and build
+  lint-web:
+    name: Lint & Build Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Run tests
+        run: npm test
+        working-directory: web
+
+      - name: TypeScript check
+        run: npm run build
+        working-directory: web
 
   # Infrastructure lint
   lint-infra:
     name: Lint Infrastructure
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        infra: [infra, infra-fs]
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +76,7 @@ jobs:
         run: uv python install ${{ env.PYTHON_VERSION }}
 
       - name: Ruff lint
-        run: uv run --directory infra ruff check stacks/
+        run: uv run --directory ${{ matrix.infra }} --extra dev ruff check stacks/
 
   # Unit tests
   test:
@@ -102,6 +132,9 @@ jobs:
     name: CDK Synth
     runs-on: ubuntu-latest
     needs: [lint-infra]
+    strategy:
+      matrix:
+        infra: [infra, infra-fs]
     steps:
       - uses: actions/checkout@v4
 
@@ -120,7 +153,7 @@ jobs:
         run: npm install -g aws-cdk
 
       - name: CDK synth
-        run: uv run --directory infra cdk synth --quiet
+        run: uv run --directory ${{ matrix.infra }} cdk synth --quiet
 
   # Security scanning (on PRs to main)
   security:
@@ -136,22 +169,137 @@ jobs:
       - name: Set up Python
         run: uv python install ${{ env.PYTHON_VERSION }}
 
+      - name: Init failure log
+        run: mkdir -p /tmp/security-output
+
+      # Semgrep - Advanced SAST (better than Bandit)
+      - name: Semgrep scan
+        id: semgrep
+        continue-on-error: true
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/python
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+
+      - name: Log Semgrep failure
+        if: steps.semgrep.outcome == 'failure'
+        run: echo "Semgrep SAST scan found issues (see job log for details)" >> /tmp/security-output/findings.txt
+
+      # pip-audit - Python CVE scanning
+      - name: Install pip-audit
+        run: uv tool install pip-audit
+
+      - name: pip-audit - API
+        run: |
+          uv export --directory api --no-hashes --no-dev --frozen > /tmp/api-reqs.txt
+          uv tool run pip-audit -r /tmp/api-reqs.txt --ignore-vuln GHSA-xxxx || true
+
+      - name: pip-audit - Worker
+        run: |
+          uv export --directory worker --no-hashes --no-dev --frozen > /tmp/worker-reqs.txt
+          uv tool run pip-audit -r /tmp/worker-reqs.txt || true
+
+      - name: pip-audit - Scheduler
+        run: |
+          uv export --directory scheduler --no-hashes --no-dev --frozen > /tmp/scheduler-reqs.txt
+          uv tool run pip-audit -r /tmp/scheduler-reqs.txt || true
+
+      # Bandit - Python SAST (kept for comparison)
       - name: Install bandit
         run: uv tool install bandit
 
       - name: Bandit scan - API
-        run: uv tool run bandit -r api/src/ -ll -ii
+        id: bandit_api
+        continue-on-error: true
+        run: uv tool run bandit -r api/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-api.txt
 
       - name: Bandit scan - Worker
-        run: uv tool run bandit -r worker/src/ -ll -ii
+        id: bandit_worker
+        continue-on-error: true
+        run: uv tool run bandit -r worker/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-worker.txt
 
       - name: Bandit scan - Scheduler
-        run: uv tool run bandit -r scheduler/src/ -ll -ii
+        id: bandit_scheduler
+        continue-on-error: true
+        run: uv tool run bandit -r scheduler/src/ -ll -ii 2>&1 | tee /tmp/security-output/bandit-scheduler.txt
 
+      - name: Log Bandit failures
+        if: steps.bandit_api.outcome == 'failure' || steps.bandit_worker.outcome == 'failure' || steps.bandit_scheduler.outcome == 'failure'
+        run: |
+          echo "Bandit SAST findings:" >> /tmp/security-output/findings.txt
+          for svc in api worker scheduler; do
+            if [ -s /tmp/security-output/bandit-$svc.txt ]; then
+              echo "--- $svc ---" >> /tmp/security-output/findings.txt
+              tail -20 /tmp/security-output/bandit-$svc.txt >> /tmp/security-output/findings.txt
+            fi
+          done
+
+      # Gitleaks - Secret scanning
       - name: Gitleaks secret scan
+        id: gitleaks
+        continue-on-error: true
         uses: gitleaks/gitleaks-action@v2
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Log Gitleaks failure
+        if: steps.gitleaks.outcome == 'failure'
+        run: echo "Gitleaks found leaked secrets (see job log for details)" >> /tmp/security-output/findings.txt
+
+      - name: Upload security findings
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-findings
+          path: /tmp/security-output/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Fail if any scan failed
+        if: steps.semgrep.outcome == 'failure' || steps.bandit_api.outcome == 'failure' || steps.bandit_worker.outcome == 'failure' || steps.bandit_scheduler.outcome == 'failure' || steps.gitleaks.outcome == 'failure'
+        run: exit 1
+
+  # IaC Security Scanning
+  iac-security:
+    name: IaC Security Scan
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [cdk-synth]
+    strategy:
+      matrix:
+        infra: [infra, infra-fs]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: CDK synth (generate CloudFormation)
+        run: uv run --directory ${{ matrix.infra }} cdk synth --quiet
+
+      # Checkov - IaC security scanner
+      - name: Checkov scan
+        uses: bridgecrewio/checkov-action@v12
+        with:
+          directory: ${{ matrix.infra }}/cdk.out
+          framework: cloudformation
+          soft_fail: true
+          output_format: cli
+          skip_check: CKV_AWS_18,CKV_AWS_21  # Skip S3 logging checks for dev
 
   # Container build validation (on PRs to main)
   container-build:
@@ -177,3 +325,343 @@ jobs:
           tags: ${{ matrix.service }}:test
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  # SBOM Generation (Software Bill of Materials)
+  sbom:
+    name: Generate & Scan SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [test]
+    strategy:
+      matrix:
+        service: [api, worker, scheduler]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install cyclonedx-bom
+        run: uv tool install cyclonedx-bom
+
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          uv export --directory ${{ matrix.service }} --no-hashes --no-dev --frozen > ${{ matrix.service }}/requirements-frozen.txt
+          uv tool run --from cyclonedx-bom cyclonedx-py requirements \
+            ${{ matrix.service }}/requirements-frozen.txt \
+            -o ${{ matrix.service }}/sbom.json \
+            --of json \
+            --sv 1.5
+
+      - name: Scan SBOM with Trivy
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'sbom'
+          scan-ref: '${{ matrix.service }}/sbom.json'
+          format: 'table'
+          output: '${{ matrix.service }}/trivy-results.txt'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Show Trivy results
+        if: always()
+        run: cat ${{ matrix.service }}/trivy-results.txt 2>/dev/null || true
+
+      - name: Build findings summary
+        if: steps.trivy.outcome == 'failure'
+        run: |
+          mkdir -p /tmp/sbom-output
+          echo "Trivy SBOM scan (${{ matrix.service }}) - CRITICAL/HIGH vulnerabilities:" > /tmp/sbom-output/findings.txt
+          cat ${{ matrix.service }}/trivy-results.txt >> /tmp/sbom-output/findings.txt 2>/dev/null || true
+
+      - name: Upload SBOM findings
+        if: steps.trivy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-findings-${{ matrix.service }}
+          path: /tmp/sbom-output/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-${{ matrix.service }}
+          path: ${{ matrix.service }}/sbom.json
+          retention-days: 90
+
+      - name: Fail if vulnerabilities found
+        if: steps.trivy.outcome == 'failure'
+        run: exit 1
+
+  # Frontend SBOM
+  sbom-web:
+    name: Generate & Scan Frontend SBOM
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    needs: [lint-web]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: web/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: web
+
+      - name: Install @cyclonedx/cyclonedx-npm
+        run: npm install -g @cyclonedx/cyclonedx-npm
+
+      - name: Generate SBOM (CycloneDX)
+        run: cyclonedx-npm --output-file sbom.json --output-format JSON
+        working-directory: web
+
+      - name: Scan SBOM with Trivy
+        id: trivy
+        continue-on-error: true
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'sbom'
+          scan-ref: 'web/sbom.json'
+          format: 'table'
+          output: 'web/trivy-results.txt'
+          exit-code: '1'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Show Trivy results
+        if: always()
+        run: cat web/trivy-results.txt 2>/dev/null || true
+
+      - name: Build findings summary
+        if: steps.trivy.outcome == 'failure'
+        run: |
+          mkdir -p /tmp/sbom-output
+          echo "Trivy SBOM scan (web) - CRITICAL/HIGH vulnerabilities:" > /tmp/sbom-output/findings.txt
+          cat web/trivy-results.txt >> /tmp/sbom-output/findings.txt 2>/dev/null || true
+
+      - name: Upload SBOM findings
+        if: steps.trivy.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-findings-web
+          path: /tmp/sbom-output/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Upload SBOM artifact
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: sbom-web
+          path: web/sbom.json
+          retention-days: 90
+
+      - name: Fail if vulnerabilities found
+        if: steps.trivy.outcome == 'failure'
+        run: exit 1
+
+  # Slack notification on failure
+  notify-failure:
+    name: Notify on Failure
+    runs-on: ubuntu-latest
+    needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
+    if: failure() && github.event_name == 'pull_request'
+    steps:
+      - name: Download security findings
+        uses: actions/download-artifact@v4
+        with:
+          pattern: '*-findings*'
+          path: /tmp/findings
+          merge-multiple: false
+        continue-on-error: true
+
+      - name: Build failure summary
+        id: summary
+        run: |
+          # Build failed jobs list (comma-separated, safe for JSON)
+          FAILED_JOBS=""
+          if [ "${{ needs.lint.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint, "; fi
+          if [ "${{ needs.lint-web.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint Frontend, "; fi
+          if [ "${{ needs.lint-infra.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint Infra, "; fi
+          if [ "${{ needs.test.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Tests, "; fi
+          if [ "${{ needs.cdk-synth.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}CDK Synth, "; fi
+          if [ "${{ needs.security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Security Scan, "; fi
+          if [ "${{ needs.iac-security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}IaC Security, "; fi
+          if [ "${{ needs.container-build.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Container Build, "; fi
+          if [ "${{ needs.sbom.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}SBOM Scan, "; fi
+          if [ "${{ needs.sbom-web.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Frontend SBOM, "; fi
+          FAILED_JOBS="${FAILED_JOBS%, }"
+          echo "failed_jobs=${FAILED_JOBS}" >> $GITHUB_OUTPUT
+
+          # Check if any security job specifically failed
+          SEC_FAILED="false"
+          if [ "${{ needs.security.result }}" = "failure" ] || \
+             [ "${{ needs.sbom.result }}" = "failure" ] || \
+             [ "${{ needs.sbom-web.result }}" = "failure" ] || \
+             [ "${{ needs.iac-security.result }}" = "failure" ]; then
+            SEC_FAILED="true"
+          fi
+          echo "security_failed=${SEC_FAILED}" >> $GITHUB_OUTPUT
+
+      - name: Build scan output
+        id: scan_detail
+        if: steps.summary.outputs.security_failed == 'true'
+        run: |
+          SCAN_OUTPUT="No details captured"
+          if [ -d /tmp/findings ]; then
+            # Strip non-ASCII (box-drawing chars break Slack), truncate to 2500 chars
+            RAW=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null \
+              | LC_ALL=C tr -cd '[:print:]\n' \
+              | head -40 \
+              | cut -c1-100)
+            if [ -n "$RAW" ]; then
+              SCAN_OUTPUT=$(printf '%s' "$RAW" | python3 -c "import sys,json;print(json.dumps(sys.stdin.read()[:2500])[1:-1])")
+            fi
+          fi
+          echo "scan_output<<GHEOF" >> $GITHUB_OUTPUT
+          printf '%s' "$SCAN_OUTPUT" >> $GITHUB_OUTPUT
+          echo "" >> $GITHUB_OUTPUT
+          echo "GHEOF" >> $GITHUB_OUTPUT
+
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "❌ CI Pipeline Failed",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.head_ref }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }}"},
+                    {"type": "mrkdwn", "text": "*Author:*\n${{ github.event.pull_request.user.login }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "*Failed Jobs:* ${{ steps.summary.outputs.failed_jobs }}"
+                  }
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+      - name: Send security findings detail
+        if: steps.summary.outputs.security_failed == 'true'
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🔒 Security Scan Details",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "```${{ steps.scan_detail.outputs.scan_output }}```"
+                  }
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
+
+  # Slack notification on success
+  notify-success:
+    name: Notify on Success
+    runs-on: ubuntu-latest
+    needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
+    if: success() && github.event_name == 'pull_request'
+    steps:
+      - name: Send Slack notification
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "✅ CI Pipeline Passed",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.head_ref }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }}"},
+                    {"type": "mrkdwn", "text": "*Author:*\n${{ github.event.pull_request.user.login }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Run"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

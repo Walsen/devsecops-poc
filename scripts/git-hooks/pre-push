@@ -29,6 +29,15 @@ run_service_checks() {
         return 1
     fi
     
+    # Format check with ruff
+    echo "  📝 Checking formatting..."
+    if uv run --directory "$service_dir" ruff format --check src/ 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Format passed${NC}"
+    else
+        echo -e "  ${RED}✗ Format failed (run: uv run --directory $service_dir ruff format src/)${NC}"
+        FAILED=1
+    fi
+
     # Lint with ruff
     echo "  📝 Linting..."
     if uv run --directory "$service_dir" ruff check src/ 2>/dev/null; then
@@ -66,6 +75,13 @@ run_service_checks "Worker" "worker"
 
 # Check scheduler (no tests yet)
 echo -e "\n${YELLOW}━━━ Checking Scheduler ━━━${NC}"
+echo "  📝 Checking formatting..."
+if uv run --directory scheduler ruff format --check src/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Format passed${NC}"
+else
+    echo -e "  ${RED}✗ Format failed (run: uv run --directory scheduler ruff format src/)${NC}"
+    FAILED=1
+fi
 echo "  📝 Linting..."
 if uv run --directory scheduler ruff check src/ 2>/dev/null; then
     echo -e "  ${GREEN}✓ Lint passed${NC}"
@@ -76,6 +92,13 @@ fi
 
 # Check infra CDK
 echo -e "\n${YELLOW}━━━ Checking Infrastructure ━━━${NC}"
+echo "  📝 Checking formatting..."
+if uv run --directory infra ruff format --check stacks/ 2>/dev/null; then
+    echo -e "  ${GREEN}✓ Format passed${NC}"
+else
+    echo -e "  ${RED}✗ Format failed (run: uv run --directory infra ruff format stacks/)${NC}"
+    FAILED=1
+fi
 echo "  📝 Linting..."
 if uv run --directory infra ruff check stacks/ 2>/dev/null; then
     echo -e "  ${GREEN}✓ Lint passed${NC}"
@@ -91,6 +114,34 @@ if uv run --directory infra cdk synth --quiet 2>/dev/null; then
 else
     echo -e "  ${RED}✗ CDK synth failed${NC}"
     FAILED=1
+fi
+
+# Check frontend
+echo -e "\n${YELLOW}━━━ Checking Frontend ━━━${NC}"
+if [ -d "web" ] && [ -f "web/package.json" ]; then
+    echo "  📦 Checking dependencies..."
+    if [ ! -d "web/node_modules" ]; then
+        echo "  Installing dependencies..."
+        npm ci --prefix web --silent 2>/dev/null
+    fi
+    
+    echo "  🧪 Running tests..."
+    if npm test --prefix web 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Tests passed${NC}"
+    else
+        echo -e "  ${RED}✗ Tests failed${NC}"
+        FAILED=1
+    fi
+    
+    echo "  🔨 Building (TypeScript check)..."
+    if npm run build --prefix web 2>/dev/null; then
+        echo -e "  ${GREEN}✓ Frontend build passed${NC}"
+    else
+        echo -e "  ${RED}✗ Frontend build failed${NC}"
+        FAILED=1
+    fi
+else
+    echo -e "  ${YELLOW}⚠ Frontend not found, skipping${NC}"
 fi
 
 # Summary

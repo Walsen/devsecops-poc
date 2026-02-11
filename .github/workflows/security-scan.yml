@@ -1,0 +1,346 @@
+name: Security Scan (DAST)
+
+on:
+  # Run on deployments to staging/prod
+  workflow_run:
+    workflows: ["Deploy"]
+    types: [completed]
+    branches: [main]
+  # Manual trigger for ad-hoc testing
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target API URL to scan'
+        required: true
+        default: 'https://api.dev.example.com'
+      scan_type:
+        description: 'Scan type'
+        required: true
+        default: 'baseline'
+        type: choice
+        options:
+          - baseline    # Quick scan (~5 min)
+          - full        # Full scan (~30 min)
+          - api         # API-focused scan
+
+env:
+  # Default to dev environment
+  TARGET_URL: ${{ inputs.target_url || 'https://api.dev.example.com' }}
+
+jobs:
+  # OWASP ZAP - Dynamic Application Security Testing
+  zap-scan:
+    name: OWASP ZAP Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    permissions:
+      issues: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Create ZAP rules file
+        run: |
+          mkdir -p .zap
+          cat > .zap/rules.tsv << 'EOF'
+          # ZAP Scan Rules Configuration
+          # Format: rule_id	action	parameter
+          # Actions: IGNORE, WARN, FAIL
+          
+          # Informational findings - ignore
+          10021	IGNORE	# X-Content-Type-Options Header Missing (we set it)
+          10036	IGNORE	# Server Leaks Version Information
+          10055	IGNORE	# CSP: Wildcard Directive (we have strict CSP)
+          
+          # Low severity - warn only
+          10020	WARN	# X-Frame-Options Header
+          10038	WARN	# Content Security Policy Header Not Set
+          
+          # Medium/High - fail the build
+          10016	FAIL	# Web Browser XSS Protection Not Enabled
+          10017	FAIL	# Cross-Domain JavaScript Source File Inclusion
+          10019	FAIL	# Content-Type Header Missing
+          10024	FAIL	# Information Disclosure - Sensitive Information in URL
+          10025	FAIL	# Information Disclosure - Sensitive Information in HTTP Referrer Header
+          10027	FAIL	# Information Disclosure - Suspicious Comments
+          10032	FAIL	# Viewstate
+          10035	FAIL	# Strict-Transport-Security Header
+          10040	FAIL	# Secure Pages Include Mixed Content
+          10054	FAIL	# Cookie Without SameSite Attribute
+          10056	FAIL	# X-Debug-Token Information Leak
+          10057	FAIL	# Username Hash Found
+          10061	FAIL	# X-AspNet-Version Response Header
+          10062	FAIL	# PII Disclosure
+          10096	FAIL	# Timestamp Disclosure
+          10098	FAIL	# Cross-Domain Misconfiguration
+          10105	FAIL	# Weak Authentication Method
+          10202	FAIL	# Absence of Anti-CSRF Tokens
+          40003	FAIL	# CRLF Injection
+          40008	FAIL	# Parameter Tampering
+          40009	FAIL	# Server Side Include
+          40012	FAIL	# Cross Site Scripting (Reflected)
+          40014	FAIL	# Cross Site Scripting (Persistent)
+          40016	FAIL	# Cross Site Scripting (Persistent) - Prime
+          40017	FAIL	# Cross Site Scripting (Persistent) - Spider
+          40018	FAIL	# SQL Injection
+          40019	FAIL	# SQL Injection - MySQL
+          40020	FAIL	# SQL Injection - Hypersonic SQL
+          40021	FAIL	# SQL Injection - Oracle
+          40022	FAIL	# SQL Injection - PostgreSQL
+          40024	FAIL	# SQL Injection - SQLite
+          40026	FAIL	# Cross Site Scripting (DOM Based)
+          40027	FAIL	# SQL Injection - MsSQL
+          40028	FAIL	# ELMAH Information Leak
+          40029	FAIL	# Trace.axd Information Leak
+          40032	FAIL	# .htaccess Information Leak
+          40034	FAIL	# .env Information Leak
+          40035	FAIL	# Hidden File Finder
+          40038	FAIL	# Bypassing 403
+          40039	FAIL	# Web Cache Deception
+          40040	FAIL	# CORS Misconfiguration
+          40042	FAIL	# Spring Actuator Information Leak
+          40043	FAIL	# Log4Shell
+          90001	FAIL	# Insecure JSF ViewState
+          90011	FAIL	# Charset Mismatch
+          90019	FAIL	# Server Side Code Injection
+          90020	FAIL	# Remote OS Command Injection
+          90021	FAIL	# XPath Injection
+          90023	FAIL	# XML External Entity Attack
+          90024	FAIL	# Generic Padding Oracle
+          90025	FAIL	# Expression Language Injection
+          90026	FAIL	# SOAP Action Spoofing
+          90028	FAIL	# Insecure HTTP Method
+          90029	FAIL	# SOAP XML Injection
+          90030	FAIL	# WSDL File Detection
+          90033	FAIL	# Loosely Scoped Cookie
+          EOF
+
+      - name: ZAP Baseline Scan
+        if: ${{ inputs.scan_type == 'baseline' || inputs.scan_type == '' }}
+        uses: zaproxy/action-baseline@v0.12.0
+        with:
+          target: ${{ env.TARGET_URL }}
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
+          allow_issue_writing: true
+          fail_action: true
+
+      - name: ZAP Full Scan
+        if: ${{ inputs.scan_type == 'full' }}
+        uses: zaproxy/action-full-scan@v0.10.0
+        with:
+          target: ${{ env.TARGET_URL }}
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
+          allow_issue_writing: true
+
+      - name: ZAP API Scan
+        if: ${{ inputs.scan_type == 'api' }}
+        uses: zaproxy/action-api-scan@v0.7.0
+        with:
+          target: ${{ env.TARGET_URL }}/openapi.json
+          rules_file_name: '.zap/rules.tsv'
+          cmd_options: '-a -j'
+          allow_issue_writing: true
+
+      - name: Upload ZAP Report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-report
+          path: report_html.html
+          retention-days: 30
+
+  # Nuclei - Fast vulnerability scanner
+  nuclei-scan:
+    name: Nuclei Vulnerability Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Nuclei
+        run: |
+          wget -q https://github.com/projectdiscovery/nuclei/releases/download/v3.2.0/nuclei_3.2.0_linux_amd64.zip
+          unzip nuclei_3.2.0_linux_amd64.zip
+          chmod +x nuclei
+          sudo mv nuclei /usr/local/bin/
+
+      - name: Update Nuclei templates
+        run: nuclei -update-templates
+
+      - name: Run Nuclei scan
+        run: |
+          nuclei -u ${{ env.TARGET_URL }} \
+            -t cves/ \
+            -t vulnerabilities/ \
+            -t exposures/ \
+            -t misconfiguration/ \
+            -t default-logins/ \
+            -severity critical,high,medium \
+            -o nuclei-results.txt \
+            -json-export nuclei-results.json \
+            || true
+
+      - name: Upload Nuclei results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: nuclei-results
+          path: |
+            nuclei-results.txt
+            nuclei-results.json
+          retention-days: 30
+
+      - name: Check for critical findings
+        run: |
+          if grep -q '"severity":"critical"' nuclei-results.json 2>/dev/null; then
+            echo "::error::Critical vulnerabilities found!"
+            cat nuclei-results.txt
+            exit 1
+          fi
+
+  # Container image scanning with Trivy
+  container-scan:
+    name: Container Security Scan
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' || github.event_name == 'workflow_dispatch' }}
+    strategy:
+      matrix:
+        service: [api, worker, scheduler]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build container for scanning
+        run: |
+          docker build -t ${{ matrix.service }}:scan ./${{ matrix.service }}
+
+      - name: Trivy vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:scan'
+          format: 'sarif'
+          output: 'trivy-${{ matrix.service }}.sarif'
+          severity: 'CRITICAL,HIGH'
+          ignore-unfixed: true
+
+      - name: Trivy table output
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: '${{ matrix.service }}:scan'
+          format: 'table'
+          severity: 'CRITICAL,HIGH,MEDIUM'
+          ignore-unfixed: true
+
+      - name: Upload Trivy SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: 'trivy-${{ matrix.service }}.sarif'
+
+  # AWS infrastructure security scan with Prowler
+  aws-security-scan:
+    name: AWS Security Scan (Prowler)
+    runs-on: ubuntu-latest
+    if: ${{ github.event_name == 'workflow_dispatch' }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_SECURITY_SCAN_ROLE_ARN }}
+          aws-region: us-east-1
+
+      - name: Install Prowler
+        run: pip install prowler
+
+      - name: Run Prowler scan
+        run: |
+          prowler aws \
+            --severity critical high \
+            --services ecs rds s3 iam kms secretsmanager cognito waf cloudfront \
+            --output-formats json html \
+            --output-directory prowler-results \
+            || true
+
+      - name: Upload Prowler results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prowler-results
+          path: prowler-results/
+          retention-days: 30
+
+  # Summary report
+  security-summary:
+    name: Security Summary
+    runs-on: ubuntu-latest
+    needs: [zap-scan, nuclei-scan, container-scan]
+    if: always()
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: security-reports
+
+      - name: Generate summary
+        run: |
+          echo "# Security Scan Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| OWASP ZAP | ${{ needs.zap-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Nuclei | ${{ needs.nuclei-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Container Scan | ${{ needs.container-scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "Reports available in workflow artifacts." >> $GITHUB_STEP_SUMMARY
+
+      - name: Notify Slack on security findings
+        if: contains(needs.*.result, 'failure')
+        uses: slackapi/slack-github-action@v1.26.0
+        with:
+          payload: |
+            {
+              "blocks": [
+                {
+                  "type": "header",
+                  "text": {
+                    "type": "plain_text",
+                    "text": "🚨 Security Scan Found Issues",
+                    "emoji": true
+                  }
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*Repository:*\n${{ github.repository }}"},
+                    {"type": "mrkdwn", "text": "*Branch:*\n${{ github.ref_name }}"}
+                  ]
+                },
+                {
+                  "type": "section",
+                  "fields": [
+                    {"type": "mrkdwn", "text": "*ZAP:*\n${{ needs.zap-scan.result }}"},
+                    {"type": "mrkdwn", "text": "*Nuclei:*\n${{ needs.nuclei-scan.result }}"},
+                    {"type": "mrkdwn", "text": "*Container:*\n${{ needs.container-scan.result }}"}
+                  ]
+                },
+                {
+                  "type": "actions",
+                  "elements": [
+                    {
+                      "type": "button",
+                      "text": {"type": "plain_text", "text": "View Security Report"},
+                      "url": "${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+                    }
+                  ]
+                }
+              ]
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+          SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK

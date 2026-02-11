@@ -53,10 +53,10 @@ class WhatsAppGateway(ChannelGateway):
                 response = await client.post(url, headers=headers, json=payload)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 message_id = data.get("messages", [{}])[0].get("id")
                 logger.info("WhatsApp message sent", message_id=message_id, recipient=recipient_id)
-                
+
                 return DeliveryResult(success=True, external_id=message_id)
 
         except httpx.HTTPStatusError as e:

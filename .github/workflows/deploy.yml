@@ -14,6 +14,14 @@ on:
           - dev
           - staging
           - prod
+      infra_type:
+        description: 'Infrastructure type'
+        required: true
+        default: 'containers'
+        type: choice
+        options:
+          - containers    # ECS Fargate (infra/)
+          - serverless    # Lambda + DynamoDB (infra-fs/)
 
 env:
   AWS_REGION: us-east-1
@@ -21,10 +29,32 @@ env:
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
-  # Build and push container images
+  # Determine infrastructure type
+  setup:
+    name: Setup
+    runs-on: ubuntu-latest
+    outputs:
+      infra_type: ${{ steps.set-infra.outputs.infra_type }}
+      infra_dir: ${{ steps.set-infra.outputs.infra_dir }}
+    steps:
+      - name: Set infrastructure type
+        id: set-infra
+        env:
+          INFRA_TYPE_INPUT: ${{ inputs.infra_type || 'containers' }}
+        run: |
+          echo "infra_type=$INFRA_TYPE_INPUT" >> $GITHUB_OUTPUT
+          if [ "$INFRA_TYPE_INPUT" == "serverless" ]; then
+            echo "infra_dir=infra-fs" >> $GITHUB_OUTPUT
+          else
+            echo "infra_dir=infra" >> $GITHUB_OUTPUT
+          fi
+
+  # Build and push container images (only for containers infra)
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.infra_type == 'containers'
     permissions:
       id-token: write
       contents: read
@@ -73,7 +103,8 @@ jobs:
   deploy-cdk:
     name: Deploy CDK
     runs-on: ubuntu-latest
-    needs: [build-and-push]
+    needs: [setup, build-and-push]
+    if: always() && needs.setup.result == 'success' && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
     permissions:
       id-token: write
       contents: read
@@ -102,21 +133,38 @@ jobs:
       - name: Install CDK
         run: npm install -g aws-cdk
 
+      - name: Determine stack names
+        id: stacks
+        run: |
+          if [ "${{ needs.setup.outputs.infra_type }}" == "serverless" ]; then
+            echo "names=OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack" >> $GITHUB_OUTPUT
+          else
+            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ComplianceStack ThreatDetectionStack" >> $GITHUB_OUTPUT
+          fi
+
       - name: CDK diff
-        run: uv run --directory infra cdk diff --all || true
+        run: |
+          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk diff \
+            --exclusively \
+            ${{ steps.stacks.outputs.names }} \
+            || true
         env:
           IMAGE_TAG: ${{ github.sha }}
 
       - name: CDK deploy
-        run: uv run --directory infra cdk deploy --all --require-approval never
+        run: |
+          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk deploy \
+            --require-approval never \
+            ${{ steps.stacks.outputs.names }}
         env:
           IMAGE_TAG: ${{ github.sha }}
 
-  # Update ECS services
+  # Update ECS services (only for containers infra)
   deploy-services:
     name: Deploy Services
     runs-on: ubuntu-latest
-    needs: [deploy-cdk]
+    needs: [setup, deploy-cdk]
+    if: needs.setup.outputs.infra_type == 'containers'
     permissions:
       id-token: write
       contents: read
@@ -148,11 +196,12 @@ jobs:
             --services api-service worker-service scheduler-service \
             --no-cli-pager || echo "Timeout waiting for services"
 
-  # Run database migrations
+  # Run database migrations (only for containers infra with RDS)
   migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [deploy-services]
+    needs: [setup, deploy-services]
+    if: needs.setup.outputs.infra_type == 'containers'
     permissions:
       id-token: write
       contents: read
@@ -167,26 +216,107 @@ jobs:
           role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
+      - name: Get network configuration from CloudFormation
+        id: network
+        run: |
+          # Get VPC ID from NetworkStack
+          VPC_ID=$(aws cloudformation describe-stacks \
+            --stack-name NetworkStack \
+            --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$VPC_ID" ]; then
+            echo "NetworkStack not found, skipping migrations"
+            echo "skip=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Get private subnets
+          SUBNETS=$(aws ec2 describe-subnets \
+            --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:aws-cdk:subnet-type,Values=Private" \
+            --query "Subnets[*].SubnetId" \
+            --output text | tr '\t' ',')
+          
+          # Get security group from ComputeStack
+          SG_ID=$(aws cloudformation describe-stacks \
+            --stack-name ComputeStack \
+            --query "Stacks[0].Outputs[?OutputKey=='ServiceSecurityGroupId'].OutputValue" \
+            --output text 2>/dev/null || echo "")
+          
+          if [ -z "$SG_ID" ]; then
+            # Fallback: find by tag
+            SG_ID=$(aws ec2 describe-security-groups \
+              --filters "Name=vpc-id,Values=$VPC_ID" "Name=description,Values=*Fargate services*" \
+              --query "SecurityGroups[0].GroupId" \
+              --output text 2>/dev/null || echo "")
+          fi
+          
+          echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
+          echo "security_group=$SG_ID" >> $GITHUB_OUTPUT
+          echo "skip=false" >> $GITHUB_OUTPUT
+
       - name: Run migrations
+        if: steps.network.outputs.skip != 'true'
         run: |
           aws ecs run-task \
             --cluster secure-api-cluster \
             --task-definition api-migration \
             --launch-type FARGATE \
-            --network-configuration "awsvpcConfiguration={subnets=[${{ secrets.PRIVATE_SUBNET_IDS }}],securityGroups=[${{ secrets.TASK_SECURITY_GROUP }}],assignPublicIp=DISABLED}" \
+            --network-configuration "awsvpcConfiguration={subnets=[${{ steps.network.outputs.subnets }}],securityGroups=[${{ steps.network.outputs.security_group }}],assignPublicIp=DISABLED}" \
             --no-cli-pager || echo "Migration task not configured yet"
+
+  # Deploy EdgeStack (CloudFront + WAF) - manual trigger only
+  # CloudFront takes 15-30 min to provision, so it's deployed separately
+  deploy-edge:
+    name: Deploy Edge (CloudFront + WAF)
+    runs-on: ubuntu-latest
+    needs: [setup, deploy-cdk]
+    if: needs.setup.outputs.infra_type == 'containers' && github.event_name == 'workflow_dispatch'
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: Deploy EdgeStack
+        run: |
+          uv run --directory infra cdk deploy EdgeStack --require-approval never
+        env:
+          IMAGE_TAG: ${{ github.sha }}
 
   # Notify on completion
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [migrate]
+    needs: [setup, deploy-cdk, deploy-services, migrate]
     if: always()
     steps:
       - name: Slack notification
         uses: 8398a7/action-slack@v3
         with:
-          status: ${{ needs.migrate.result }}
+          status: ${{ needs.deploy-cdk.result }}
           fields: repo,message,commit,author,workflow
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}

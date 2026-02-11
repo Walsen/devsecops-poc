@@ -40,7 +40,8 @@ class DataStack(Stack):
 
         # Database credentials in Secrets Manager
         self.db_secret = secretsmanager.Secret(
-            self, "DbSecret",
+            self,
+            "DbSecret",
             secret_name="secure-api/db-credentials",
             generate_secret_string=secretsmanager.SecretStringGenerator(
                 secret_string_template=json.dumps({"username": "dbadmin"}),
@@ -52,7 +53,8 @@ class DataStack(Stack):
 
         # Security group for RDS
         db_security_group = ec2.SecurityGroup(
-            self, "DbSecurityGroup",
+            self,
+            "DbSecurityGroup",
             vpc=vpc,
             description="Security group for RDS instance",
             allow_all_outbound=False,
@@ -64,13 +66,12 @@ class DataStack(Stack):
 
         # RDS PostgreSQL - Dev: Single-AZ, smaller instance
         self.database = rds.DatabaseInstance(
-            self, "Database",
+            self,
+            "Database",
             engine=rds.DatabaseInstanceEngine.postgres(
                 version=rds.PostgresEngineVersion.VER_15,
             ),
-            instance_type=ec2.InstanceType.of(
-                ec2.InstanceClass.T3, ec2.InstanceSize.MICRO
-            ),
+            instance_type=ec2.InstanceType.of(ec2.InstanceClass.T3, ec2.InstanceSize.MICRO),
             vpc=vpc,
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
             security_groups=[db_security_group],
@@ -85,7 +86,8 @@ class DataStack(Stack):
 
         # S3 bucket with encryption - Dev: S3-managed encryption, auto-delete
         self.data_bucket = s3.Bucket(
-            self, "DataBucket",
+            self,
+            "DataBucket",
             encryption=s3.BucketEncryption.S3_MANAGED,  # Dev: Free S3 encryption
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             enforce_ssl=True,
@@ -96,7 +98,8 @@ class DataStack(Stack):
 
         # Kinesis Data Stream - Dev: On-demand mode (pay per use)
         self.event_stream = kinesis.Stream(
-            self, "EventStream",
+            self,
+            "EventStream",
             stream_name="secure-api-events",
             encryption=kinesis.StreamEncryption.MANAGED,  # Dev: AWS-managed encryption
             stream_mode=kinesis.StreamMode.ON_DEMAND,  # Dev: Pay per use

@@ -54,7 +54,8 @@ class ComputeStack(Stack):
 
         # ECS Cluster
         self.cluster = ecs.Cluster(
-            self, "Cluster",
+            self,
+            "Cluster",
             vpc=vpc,
             container_insights=True,
         )
@@ -64,9 +65,32 @@ class ComputeStack(Stack):
             name="secure-api.local",
         )
 
+        # Create log groups for each service (exposed for monitoring stack)
+        self.api_log_group = logs.LogGroup(
+            self,
+            "ApiLogGroup",
+            log_group_name="/ecs/secure-api/api",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        self.worker_log_group = logs.LogGroup(
+            self,
+            "WorkerLogGroup",
+            log_group_name="/ecs/secure-api/worker",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        self.scheduler_log_group = logs.LogGroup(
+            self,
+            "SchedulerLogGroup",
+            log_group_name="/ecs/secure-api/scheduler",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
         # Application Load Balancer
         self.alb = elbv2.ApplicationLoadBalancer(
-            self, "Alb",
+            self,
+            "Alb",
             vpc=vpc,
             internet_facing=True,
             security_group=alb_security_group,
@@ -76,7 +100,8 @@ class ComputeStack(Stack):
         # WAF WebACL for ALB (OWASP rules)
         web_acl = self._create_waf_web_acl()
         wafv2.CfnWebACLAssociation(
-            self, "AlbWafAssociation",
+            self,
+            "AlbWafAssociation",
             resource_arn=self.alb.load_balancer_arn,
             web_acl_arn=web_acl.attr_arn,
         )
@@ -98,7 +123,8 @@ class ComputeStack(Stack):
         # API Service (Sync - handles HTTP requests)
         # ============================================================
         api_task_def = ecs.FargateTaskDefinition(
-            self, "ApiTaskDef",
+            self,
+            "ApiTaskDef",
             memory_limit_mib=512,
             cpu=256,
         )
@@ -111,7 +137,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="api",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.api_log_group,
             ),
             environment={
                 **shared_environment,
@@ -121,17 +147,16 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        api_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        api_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.api_service = ecs.FargateService(
-            self, "ApiService",
+            self,
+            "ApiService",
             cluster=self.cluster,
             task_definition=api_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            ),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="api"),
         )
 
@@ -139,7 +164,8 @@ class ComputeStack(Stack):
         # Worker Service (Async - consumes Kinesis, delivers messages)
         # ============================================================
         worker_task_def = ecs.FargateTaskDefinition(
-            self, "WorkerTaskDef",
+            self,
+            "WorkerTaskDef",
             memory_limit_mib=512,
             cpu=256,
         )
@@ -152,7 +178,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="worker",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.worker_log_group,
             ),
             environment={
                 **shared_environment,
@@ -162,17 +188,16 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        worker_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        worker_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.worker_service = ecs.FargateService(
-            self, "WorkerService",
+            self,
+            "WorkerService",
             cluster=self.cluster,
             task_definition=worker_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            ),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="worker"),
         )
 
@@ -180,8 +205,9 @@ class ComputeStack(Stack):
         # Scheduler Service (Cron - triggers scheduled messages)
         # ============================================================
         scheduler_task_def = ecs.FargateTaskDefinition(
-            self, "SchedulerTaskDef",
-            memory_limit_mib=256,
+            self,
+            "SchedulerTaskDef",
+            memory_limit_mib=512,
             cpu=256,
         )
         db_secret.grant_read(scheduler_task_def.task_role)
@@ -193,7 +219,7 @@ class ComputeStack(Stack):
             image=ecs.ContainerImage.from_registry("amazon/amazon-ecs-sample"),
             logging=ecs.LogDrivers.aws_logs(
                 stream_prefix="scheduler",
-                log_retention=logs.RetentionDays.ONE_MONTH,
+                log_group=self.scheduler_log_group,
             ),
             environment={
                 **shared_environment,
@@ -203,17 +229,16 @@ class ComputeStack(Stack):
                 "DB_SECRET": ecs.Secret.from_secrets_manager(db_secret),
             },
         )
-        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=8080))
+        scheduler_container.add_port_mappings(ecs.PortMapping(container_port=80))
 
         self.scheduler_service = ecs.FargateService(
-            self, "SchedulerService",
+            self,
+            "SchedulerService",
             cluster=self.cluster,
             task_definition=scheduler_task_def,
-            desired_count=1,
+            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
             security_groups=[self.service_security_group],
-            vpc_subnets=ec2.SubnetSelection(
-                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS
-            ),
+            vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="scheduler"),
         )
 
@@ -230,10 +255,10 @@ class ComputeStack(Stack):
 
         listener.add_targets(
             "ApiTarget",
-            port=8080,
+            port=80,
             targets=[self.api_service],
             health_check=elbv2.HealthCheck(
-                path="/health",
+                path="/",
                 interval=Duration.seconds(30),
             ),
         )
@@ -241,7 +266,8 @@ class ComputeStack(Stack):
     def _create_waf_web_acl(self) -> wafv2.CfnWebACL:
         """Create WAF WebACL with OWASP rules."""
         return wafv2.CfnWebACL(
-            self, "AlbWebAcl",
+            self,
+            "AlbWebAcl",
             default_action=wafv2.CfnWebACL.DefaultActionProperty(allow={}),
             scope="REGIONAL",
             visibility_config=wafv2.CfnWebACL.VisibilityConfigProperty(

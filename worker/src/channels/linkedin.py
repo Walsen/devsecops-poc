@@ -47,15 +47,17 @@ class LinkedInGateway(ChannelGateway):
 
         # If media URL provided, include it as an article
         if media_url:
-            share_content["specificContent"]["com.linkedin.ugc.ShareContent"].update({
-                "shareMediaCategory": "IMAGE",
-                "media": [
-                    {
-                        "status": "READY",
-                        "originalUrl": media_url,
-                    }
-                ],
-            })
+            share_content["specificContent"]["com.linkedin.ugc.ShareContent"].update(
+                {
+                    "shareMediaCategory": "IMAGE",
+                    "media": [
+                        {
+                            "status": "READY",
+                            "originalUrl": media_url,
+                        }
+                    ],
+                }
+            )
 
         try:
             async with httpx.AsyncClient() as client:

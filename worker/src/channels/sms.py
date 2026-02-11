@@ -34,7 +34,7 @@ class SmsGateway(ChannelGateway):
                     "PhoneNumber": recipient_id,
                     "Message": content,
                 }
-                
+
                 if self._sender_id:
                     params["MessageAttributes"] = {
                         "AWS.SNS.SMS.SenderID": {
@@ -42,10 +42,10 @@ class SmsGateway(ChannelGateway):
                             "StringValue": self._sender_id,
                         }
                     }
-                
+
                 response = await client.publish(**params)
                 message_id = response.get("MessageId")
-                
+
                 logger.info("SMS sent", message_id=message_id, recipient=recipient_id)
                 return DeliveryResult(success=True, external_id=message_id)
 

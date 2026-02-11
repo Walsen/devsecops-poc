@@ -4,22 +4,19 @@ import structlog
 from fastapi import FastAPI
 
 from .config import settings
+from .infrastructure.logging import configure_logging
 from .presentation.api.dependencies import get_database
-from .presentation.api.v1 import health, messages
-
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
+from .presentation.api.v1 import auth, certifications, health, messages
+from .presentation.middleware import (
+    CorrelationIdMiddleware,
+    CSRFMiddleware,
+    RateLimitMiddleware,
+    RequestSizeLimitMiddleware,
+    SecurityHeadersMiddleware,
 )
+
+# Configure enterprise logging
+configure_logging(settings.service_name)
 
 logger = structlog.get_logger()
 
@@ -48,13 +45,28 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# Security: Add middleware (order matters - first added = last executed)
+# CSRF protection for state-changing requests
+if settings.csrf_enabled:
+    app.add_middleware(
+        CSRFMiddleware,
+        secret_key=settings.secret_key,
+        secure_cookies=not settings.debug,  # Secure cookies in production
+    )
+app.add_middleware(RateLimitMiddleware)  # Per-user rate limiting
+app.add_middleware(RequestSizeLimitMiddleware, max_size=1 * 1024 * 1024)  # 1 MB limit
+app.add_middleware(SecurityHeadersMiddleware)
+app.add_middleware(CorrelationIdMiddleware)  # Request tracing (runs first)
+
 # Include routers
 app.include_router(health.router)
+app.include_router(auth.router, prefix="/api/v1")
 app.include_router(messages.router, prefix="/api/v1")
+app.include_router(certifications.router, prefix="/api/v1")
 
 
 @app.get("/")
-async def root():
+def root() -> dict:
     return {
         "service": settings.service_name,
         "version": "0.1.0",

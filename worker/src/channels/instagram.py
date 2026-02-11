@@ -41,7 +41,7 @@ class InstagramGateway(ChannelGateway):
                     "caption": content,
                     "access_token": self._access_token,
                 }
-                
+
                 response = await client.post(container_url, data=container_payload)
                 response.raise_for_status()
                 container_id = response.json().get("id")
@@ -52,11 +52,11 @@ class InstagramGateway(ChannelGateway):
                     "creation_id": container_id,
                     "access_token": self._access_token,
                 }
-                
+
                 response = await client.post(publish_url, data=publish_payload)
                 response.raise_for_status()
                 post_id = response.json().get("id")
-                
+
                 logger.info("Instagram post published", post_id=post_id)
                 return DeliveryResult(success=True, external_id=post_id)
 

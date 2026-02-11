@@ -1,0 +1,12 @@
+# Gitleaks configuration
+# https://github.com/gitleaks/gitleaks#configuration
+
+title = "Gitleaks config for devsecops-poc"
+
+# Allowlist paths that contain intentional example secrets in documentation
+[allowlist]
+description = "Documentation files with example/placeholder secrets"
+paths = [
+    '''docs/penetration-testing\.md''',
+    '''\.kiro/steering/security\.md''',
+]

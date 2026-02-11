@@ -6,22 +6,12 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from .config import settings
+from .infrastructure.logging import configure_logging
 from .publisher import EventPublisher
 from .scheduler import MessageScheduler
 
-# Configure structured logging
-structlog.configure(
-    processors=[
-        structlog.stdlib.filter_by_level,
-        structlog.stdlib.add_logger_name,
-        structlog.stdlib.add_log_level,
-        structlog.processors.TimeStamper(fmt="iso"),
-        structlog.processors.JSONRenderer(),
-    ],
-    wrapper_class=structlog.stdlib.BoundLogger,
-    context_class=dict,
-    logger_factory=structlog.stdlib.LoggerFactory(),
-)
+# Configure enterprise logging
+configure_logging(settings.service_name)
 
 logger = structlog.get_logger()
 
@@ -34,7 +24,7 @@ _session_factory = None
 async def poll_job() -> None:
     """Job that runs on schedule to check for due messages."""
     global _session_factory
-    
+
     if _session_factory is None:
         return
 
@@ -66,7 +56,7 @@ async def main() -> None:
 
     # Handle shutdown signals
     loop = asyncio.get_event_loop()
-    
+
     def shutdown():
         global _running
         _running = False

@@ -27,12 +27,12 @@ class FacebookGateway(ChannelGateway):
     ) -> DeliveryResult:
         """Post to Facebook Page."""
         url = f"{self.BASE_URL}/{self._page_id}/feed"
-        
+
         payload = {
             "message": content,
             "access_token": self._access_token,
         }
-        
+
         if media_url:
             # For photo posts, use /photos endpoint
             url = f"{self.BASE_URL}/{self._page_id}/photos"
@@ -45,10 +45,10 @@ class FacebookGateway(ChannelGateway):
                 response = await client.post(url, data=payload)
                 response.raise_for_status()
                 data = response.json()
-                
+
                 post_id = data.get("id") or data.get("post_id")
                 logger.info("Facebook post created", post_id=post_id)
-                
+
                 return DeliveryResult(success=True, external_id=post_id)
 
         except httpx.HTTPStatusError as e:

@@ -43,10 +43,10 @@ class EmailGateway(ChannelGateway):
                         },
                     },
                 )
-                
+
                 message_id = response.get("MessageId")
                 logger.info("Email sent", message_id=message_id, recipient=recipient_id)
-                
+
                 return DeliveryResult(success=True, external_id=message_id)
 
         except Exception as e:

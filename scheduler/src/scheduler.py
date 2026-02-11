@@ -20,7 +20,7 @@ class MessageScheduler:
     async def process_due_messages(self) -> int:
         """Find and dispatch all messages that are due for delivery."""
         now = datetime.utcnow()
-        
+
         logger.info("Checking for due messages", timestamp=now.isoformat())
 
         # Find scheduled messages that are due
@@ -37,9 +37,9 @@ class MessageScheduler:
             """),
             {"now": now, "limit": settings.batch_size},
         )
-        
+
         messages = result.fetchall()
-        
+
         if not messages:
             logger.debug("No due messages found")
             return 0

@@ -78,20 +78,22 @@ flowchart TB
 - **Scheduled Messages**: Schedule announcements for future delivery
 - **Role-based Access**: Admin and Community Manager roles
 - **Zero Trust Security**: WAF, encryption, GuardDuty, Security Hub
+- **API Security Middleware**: CSRF protection, CSP headers, rate limiting, request validation
 - **Secure Supply Chain**: Signed containers, SBOM, vulnerability scanning
+- **Enterprise Observability**: Structured logging, distributed tracing, CloudWatch alarms
 
 ## Tech Stack
 
-| Layer | Technology |
-|-------|------------|
-| Frontend | React/Next.js (planned) |
-| API | FastAPI (Python) |
-| Database | PostgreSQL (RDS) |
-| Queue | Kinesis Data Streams |
-| Auth | Cognito + Social Providers |
-| Infrastructure | AWS CDK (Python) |
-| Containers | ECS Fargate |
-| CI/CD | GitHub Actions |
+| Layer | Containers | Serverless |
+|-------|------------|------------|
+| Frontend | React (Amplify) | React (Amplify) |
+| API | FastAPI on ECS | FastAPI on Lambda |
+| Database | PostgreSQL (RDS) | DynamoDB |
+| Queue | Kinesis Data Streams | Kinesis Data Streams |
+| Auth | Cognito + Social | Cognito + Social |
+| Infrastructure | AWS CDK (Python) | AWS CDK (Python) |
+| Compute | ECS Fargate | Lambda |
+| CI/CD | GitHub Actions | GitHub Actions |
 
 ## Services
 
@@ -104,16 +106,36 @@ Consumes messages from Kinesis and delivers them to the appropriate channels (Fa
 ### Scheduler Service
 Polls the database for scheduled messages and publishes them to Kinesis when due.
 
+## Dual-Mode Deployment
+
+The platform supports two deployment modes that can be switched at any time via a single CI/CD parameter:
+
+| | Containers (`infra/`) | Serverless (`infra-fs/`) |
+|---|---|---|
+| Compute | ECS Fargate | Lambda |
+| Database | PostgreSQL (RDS) | DynamoDB (Single-Table) |
+| API Gateway | ALB + CloudFront | API Gateway + CloudFront |
+| Scheduler | ECS Service (APScheduler) | EventBridge + Lambda |
+| Cost (low traffic) | ~$180-200/mo | ~$5-15/mo |
+
+Both modes share the same domain and application layers thanks to hexagonal architecture — only the infrastructure adapters change. The deploy workflow selects the mode via `infra_type` input (`containers` or `serverless`), routing to the corresponding CDK project. Stack names are fully independent, so both can coexist in the same AWS account during migration.
+
+See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration strategy.
+
 ## Documentation
 
-- [Architecture](architecture.md) - Detailed system architecture and patterns
+- [Architecture (Containers)](architecture-containers.md) - ECS Fargate deployment with PostgreSQL
+- [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
+- [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between containers and serverless
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
+- [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
 - [AI Agents](ai-agents.md) - Using Bedrock Agents for intelligent posting
 
 ## Use Cases
 
 - [AWS Certification Announcer](use-cases/aws-certification-announcer.md) - Primary use case
+- [Operational Notifications](use-cases/operational-notifications.md) - Dog-fooding CI/CD and monitoring alerts through the platform
 
 ## Getting Started
 
@@ -151,21 +173,61 @@ uv run cdk deploy --all
 
 ```
 .
-├── api/                    # API service (FastAPI)
+├── api/                    # API service (FastAPI + ECS)
 │   ├── src/
-│   │   ├── domain/         # Business entities
-│   │   ├── application/    # Use cases and ports
-│   │   ├── infrastructure/ # Adapters (DB, Kinesis)
-│   │   └── presentation/   # HTTP layer
-│   └── tests/
-├── worker/                 # Worker service (Kinesis consumer)
+│   │   ├── domain/         # Business entities, value objects
+│   │   ├── application/    # Use cases, ports, DTOs
+│   │   ├── infrastructure/ # Adapters (DB, Kinesis, Secrets)
+│   │   └── presentation/   # HTTP routes, middleware
+│   ├── tests/              # Unit tests
+│   └── alembic/            # Database migrations
+│
+├── api-lambda/             # API Lambda handler (serverless)
+│
+├── worker/                 # Worker service (Kinesis consumer + ECS)
+│   ├── src/
+│   │   ├── domain/         # Ports for channels, publishers
+│   │   ├── application/    # Delivery service
+│   │   ├── infrastructure/ # Publisher adapters (Direct, AI Agent)
+│   │   └── channels/       # Channel gateways (FB, IG, LI, Email, SMS)
+│   └── tests/              # Unit tests
+│
+├── worker-lambda/          # Worker Lambda handler (serverless)
+│
+├── scheduler/              # Scheduler service (cron + ECS)
+│   └── src/                # APScheduler, due message scanner
+│
+├── scheduler-lambda/       # Scheduler Lambda handler (serverless)
+│
+├── web/                    # Frontend (React + Vite + TypeScript)
 │   └── src/
-│       └── channels/       # Channel gateways
-├── scheduler/              # Scheduler service (cron)
-├── infra/                  # CDK infrastructure
-│   └── stacks/
+│       ├── components/     # React components
+│       ├── pages/          # Page components
+│       ├── api/            # API client
+│       └── types/          # TypeScript types
+│
+├── infra/                  # CDK infrastructure (containers)
+│   └── stacks/             # Network, Security, Auth, Data, Compute, Edge, Monitoring
+│
+├── infra-fs/               # CDK infrastructure (serverless)
+│   └── stacks/             # Data, Auth, API, Worker, Scheduler, Security, Frontend
+│
 ├── docs/                   # Documentation
-└── .github/                # CI/CD workflows
+│   ├── architecture-containers.md
+│   ├── architecture-serverless.md
+│   ├── security.md
+│   └── use-cases/
+│
+├── scripts/                # Utility scripts
+│   └── git-hooks/          # Pre-push hooks (lint, test)
+│
+├── .github/                # CI/CD
+│   └── workflows/          # GitHub Actions (security-scan)
+│
+├── devbox.json             # Development environment
+├── docker-compose.yml      # Local services (PostgreSQL, LocalStack)
+├── justfile                # Task runner commands
+└── ruff.toml               # Linter configuration
 ```
 
 ## License
