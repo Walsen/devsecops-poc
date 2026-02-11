@@ -12,7 +12,7 @@ on:
       target_url:
         description: 'Target API URL to scan'
         required: true
-        default: 'https://api.dev.example.com'
+        default: 'http://Comput-Alb16-j1fq7hseoZQw-945843054.us-east-1.elb.amazonaws.com'
       scan_type:
         description: 'Scan type'
         required: true
@@ -25,7 +25,7 @@ on:
 
 env:
   # Default to dev environment
-  TARGET_URL: ${{ inputs.target_url || 'https://api.dev.example.com' }}
+  TARGET_URL: ${{ inputs.target_url || 'http://Comput-Alb16-j1fq7hseoZQw-945843054.us-east-1.elb.amazonaws.com' }}
 
 jobs:
   # OWASP ZAP - Dynamic Application Security Testing
