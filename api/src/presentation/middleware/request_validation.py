@@ -78,38 +78,44 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
 
     # Content Security Policy for API
     # Strict policy since this is an API, not serving HTML
-    CSP_API = "; ".join([
-        "default-src 'none'",
-        "frame-ancestors 'none'",
-        "base-uri 'none'",
-        "form-action 'none'",
-    ])
+    CSP_API = "; ".join(
+        [
+            "default-src 'none'",
+            "frame-ancestors 'none'",
+            "base-uri 'none'",
+            "form-action 'none'",
+        ]
+    )
 
     # Content Security Policy for docs (Swagger/ReDoc)
     # More permissive to allow UI functionality
-    CSP_DOCS = "; ".join([
-        "default-src 'self'",
-        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
-        "img-src 'self' data: https://cdn.jsdelivr.net",
-        "font-src 'self' https://cdn.jsdelivr.net",
-        "connect-src 'self'",
-        "frame-ancestors 'none'",
-        "base-uri 'self'",
-        "form-action 'self'",
-    ])
+    CSP_DOCS = "; ".join(
+        [
+            "default-src 'self'",
+            "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+            "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net",
+            "img-src 'self' data: https://cdn.jsdelivr.net",
+            "font-src 'self' https://cdn.jsdelivr.net",
+            "connect-src 'self'",
+            "frame-ancestors 'none'",
+            "base-uri 'self'",
+            "form-action 'self'",
+        ]
+    )
 
     # Permissions Policy (formerly Feature-Policy)
-    PERMISSIONS_POLICY = ", ".join([
-        "accelerometer=()",
-        "camera=()",
-        "geolocation=()",
-        "gyroscope=()",
-        "magnetometer=()",
-        "microphone=()",
-        "payment=()",
-        "usb=()",
-    ])
+    PERMISSIONS_POLICY = ", ".join(
+        [
+            "accelerometer=()",
+            "camera=()",
+            "geolocation=()",
+            "gyroscope=()",
+            "magnetometer=()",
+            "microphone=()",
+            "payment=()",
+            "usb=()",
+        ]
+    )
 
     async def dispatch(self, request: Request, call_next) -> Response:
         response = await call_next(request)

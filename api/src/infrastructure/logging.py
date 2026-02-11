@@ -47,9 +47,11 @@ def configure_logging(service_name: str) -> None:
 
 def _add_service_name(service_name: str):
     """Processor to add service name to all logs."""
+
     def processor(logger, method_name, event_dict):
         event_dict["service"] = service_name
         return event_dict
+
     return processor
 
 
@@ -116,6 +118,7 @@ def timed(logger: Any = None):
         async def my_function():
             ...
     """
+
     def decorator(func: Callable):
         @wraps(func)
         async def async_wrapper(*args, **kwargs):
@@ -142,6 +145,7 @@ def timed(logger: Any = None):
             return result
 
         import asyncio
+
         if asyncio.iscoroutinefunction(func):
             return async_wrapper
         return sync_wrapper
