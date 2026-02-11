@@ -1,3 +1,3 @@
-from .message import Message, MessageStatus
+from .message import ChannelDelivery, Message, MessageStatus
 
-__all__ = ["Message", "MessageStatus"]
+__all__ = ["ChannelDelivery", "Message", "MessageStatus"]
