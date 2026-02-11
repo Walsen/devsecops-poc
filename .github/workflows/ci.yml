@@ -522,13 +522,19 @@ jobs:
         run: |
           SCAN_OUTPUT="No details captured"
           if [ -d /tmp/findings ]; then
-            RAW=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null | head -60 | cut -c1-100)
+            # Strip non-ASCII (box-drawing chars break Slack), truncate to 2500 chars
+            RAW=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null \
+              | LC_ALL=C tr -cd '[:print:]\n' \
+              | head -40 \
+              | cut -c1-100)
             if [ -n "$RAW" ]; then
-              # Escape backslashes, double quotes, and replace newlines with \n for JSON
-              SCAN_OUTPUT=$(printf '%s' "$RAW" | python3 -c "import sys,json; print(json.dumps(sys.stdin.read())[1:-1])")
+              SCAN_OUTPUT=$(printf '%s' "$RAW" | python3 -c "
+import sys, json
+text = sys.stdin.read()[:2500]
+print(json.dumps(text)[1:-1])
+")
             fi
           fi
-          # Use heredoc for multiline-safe output
           echo "scan_output<<GHEOF" >> $GITHUB_OUTPUT
           printf '%s' "$SCAN_OUTPUT" >> $GITHUB_OUTPUT
           echo "" >> $GITHUB_OUTPUT
