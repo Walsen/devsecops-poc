@@ -28,10 +28,13 @@ async def poll_job() -> None:
     if _session_factory is None:
         return
 
-    async with _session_factory() as session:
-        publisher = EventPublisher()
-        scheduler = MessageScheduler(session, publisher)
-        await scheduler.process_due_messages()
+    try:
+        async with _session_factory() as session:
+            publisher = EventPublisher()
+            scheduler = MessageScheduler(session, publisher)
+            await scheduler.process_due_messages()
+    except Exception as e:
+        logger.warning("Poll job failed, will retry next interval", error=str(e))
 
 
 async def main() -> None:
