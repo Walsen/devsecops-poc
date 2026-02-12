@@ -277,6 +277,8 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.services == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -387,6 +389,8 @@ jobs:
     if: github.event_name == 'pull_request' && needs.changes.outputs.any_code == 'true' && needs.changes.outputs.services == 'false'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Gitleaks secret scan
         id: gitleaks
