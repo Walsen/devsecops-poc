@@ -396,11 +396,31 @@ jobs:
 
           echo "names=$STACKS" >> $GITHUB_OUTPUT
 
+      - name: Determine image tag
+        id: image-tag
+        run: |
+          SERVICES="${{ needs.changes.outputs.services }}"
+          if [ "$SERVICES" = "true" ]; then
+            # New images were built with this commit SHA
+            echo "tag=${{ github.sha }}" >> $GITHUB_OUTPUT
+          else
+            # No new images — resolve the latest tag from ECR
+            LATEST_TAG=$(aws ecr describe-images \
+              --repository-name api \
+              --query "imageDetails | sort_by(@, &imagePushedAt) | [-1].imageTags[?@ != 'latest'] | [0]" \
+              --output text 2>/dev/null || echo "latest")
+            if [ -z "$LATEST_TAG" ] || [ "$LATEST_TAG" = "None" ]; then
+              LATEST_TAG="latest"
+            fi
+            echo "tag=$LATEST_TAG" >> $GITHUB_OUTPUT
+            echo "Using existing image tag: $LATEST_TAG (no service code changes)"
+          fi
+
       - name: CDK diff
         run: |
           uv run --directory infra cdk diff \
             --exclusively \
-            -c image_tag=${{ github.sha }} \
+            -c image_tag=${{ steps.image-tag.outputs.tag }} \
             ${{ steps.stacks.outputs.names }} \
             || true
 
@@ -408,7 +428,7 @@ jobs:
         run: |
           uv run --directory infra cdk deploy \
             --require-approval never \
-            -c image_tag=${{ github.sha }} \
+            -c image_tag=${{ steps.image-tag.outputs.tag }} \
             ${{ steps.stacks.outputs.names }}
 
   # ============================================================
@@ -731,7 +751,7 @@ jobs:
         run: |
           uv run --directory infra cdk deploy EdgeStack \
             --require-approval never \
-            -c image_tag=${{ github.sha }}
+            -c image_tag=latest
 
   # ============================================================
   # Notify on completion
