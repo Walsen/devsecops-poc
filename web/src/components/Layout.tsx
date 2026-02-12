@@ -1,5 +1,5 @@
 import { Outlet, Link } from 'react-router-dom';
-import { Award, Home } from 'lucide-react';
+import { Award, Home, Send } from 'lucide-react';
 
 export function Layout() {
   return (
@@ -18,6 +18,13 @@ export function Layout() {
               >
                 <Home className="h-4 w-4" />
                 <span>Home</span>
+              </Link>
+              <Link
+                to="/publish"
+                className="flex items-center gap-1 px-3 py-2 rounded-md hover:bg-white/10 transition-colors"
+              >
+                <Send className="h-4 w-4" />
+                <span>Publish</span>
               </Link>
             </nav>
           </div>

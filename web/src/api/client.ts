@@ -72,6 +72,28 @@ export async function checkSession(): Promise<boolean> {
   }
 }
 
+export interface ScheduleMessageRequest {
+  content: string;
+  channels: string[];
+}
+
+export interface ScheduleMessageResponse {
+  id: string;
+  status: string;
+}
+
+export async function scheduleMessage(
+  request: ScheduleMessageRequest
+): Promise<ScheduleMessageResponse> {
+  const { data } = await api.post<ScheduleMessageResponse>('/api/v1/messages/', {
+    content: request.content,
+    channels: request.channels,
+    scheduled_at: new Date().toISOString(),
+    recipient_id: 'broadcast',
+  });
+  return data;
+}
+
 export async function submitCertification(
   submission: CertificationSubmission
 ): Promise<SubmissionResponse> {
