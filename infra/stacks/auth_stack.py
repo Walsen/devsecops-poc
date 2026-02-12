@@ -139,8 +139,14 @@ class AuthStack(Stack):
                     cognito.OAuthScope.EMAIL,
                     cognito.OAuthScope.PROFILE,
                 ],
-                callback_urls=["http://localhost:3000/callback"],
-                logout_urls=["http://localhost:3000/logout"],
+                callback_urls=[
+                    "http://localhost:3000/callback",
+                    "https://main.d3ky9nk2dk6g5n.amplifyapp.com/callback",
+                ],
+                logout_urls=[
+                    "http://localhost:3000/logout",
+                    "https://main.d3ky9nk2dk6g5n.amplifyapp.com/logout",
+                ],
             ),
             supported_identity_providers=[
                 cognito.UserPoolClientIdentityProvider.COGNITO,
