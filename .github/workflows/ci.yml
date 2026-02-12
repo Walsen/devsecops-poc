@@ -3,18 +3,110 @@ name: CI
 on:
   push:
     branches: [feature/**, develop]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+      - '.gitleaks.toml'
+      - '.vscode/**'
   pull_request:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+      - '.gitleaks.toml'
+      - '.vscode/**'
 
 env:
   PYTHON_VERSION: "3.12"
   NODE_VERSION: "20"
 
 jobs:
-  # Lint and type check
+  # ============================================================
+  # Detect what changed to skip unnecessary jobs
+  # ============================================================
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.services }}
+      web: ${{ steps.filter.outputs.web }}
+      infra: ${{ steps.filter.outputs.infra }}
+      infra_fs: ${{ steps.filter.outputs.infra_fs }}
+      lambdas: ${{ steps.filter.outputs.lambdas }}
+      any_code: ${{ steps.filter.outputs.any_code }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Detect changed paths
+        id: filter
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE="${{ github.event.pull_request.base.sha }}"
+            HEAD="${{ github.event.pull_request.head.sha }}"
+            CHANGED=$(git diff --name-only "$BASE" "$HEAD" 2>/dev/null || echo "")
+          else
+            CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED"
+          echo ""
+
+          # Service code (api/, worker/, scheduler/)
+          if echo "$CHANGED" | grep -qE '^(api|worker|scheduler)/'; then
+            echo "services=true" >> $GITHUB_OUTPUT
+          else
+            echo "services=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Frontend (web/)
+          if echo "$CHANGED" | grep -qE '^web/'; then
+            echo "web=true" >> $GITHUB_OUTPUT
+          else
+            echo "web=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Container infra (infra/)
+          if echo "$CHANGED" | grep -qE '^infra/'; then
+            echo "infra=true" >> $GITHUB_OUTPUT
+          else
+            echo "infra=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Serverless infra (infra-fs/)
+          if echo "$CHANGED" | grep -qE '^infra-fs/'; then
+            echo "infra_fs=true" >> $GITHUB_OUTPUT
+          else
+            echo "infra_fs=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Lambda handlers
+          if echo "$CHANGED" | grep -qE '^(api-lambda|worker-lambda|scheduler-lambda)/'; then
+            echo "lambdas=true" >> $GITHUB_OUTPUT
+          else
+            echo "lambdas=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Any code at all (for gitleaks — always run on code changes)
+          if echo "$CHANGED" | grep -qE '\.(py|ts|tsx|js|jsx|json|yml|yaml|toml|cfg|ini|sh)$'; then
+            echo "any_code=true" >> $GITHUB_OUTPUT
+          else
+            echo "any_code=false" >> $GITHUB_OUTPUT
+          fi
+
+
+  # ============================================================
+  # Python service lint (only when service code changed)
+  # ============================================================
   lint:
     name: Lint
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.services == 'true'
     strategy:
       matrix:
         service: [api, worker, scheduler]
@@ -33,10 +125,14 @@ jobs:
       - name: Ruff format check
         run: uv run --directory ${{ matrix.service }} --extra dev ruff format --check src/
 
-  # Frontend lint and build
+  # ============================================================
+  # Frontend lint and build (only when web/ changed)
+  # ============================================================
   lint-web:
     name: Lint & Build Frontend
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.web == 'true'
     steps:
       - uses: actions/checkout@v4
 
@@ -59,10 +155,14 @@ jobs:
         run: npm run build
         working-directory: web
 
-  # Infrastructure lint
+  # ============================================================
+  # Infrastructure lint (only when infra code changed)
+  # ============================================================
   lint-infra:
     name: Lint Infrastructure
     runs-on: ubuntu-latest
+    needs: [changes]
+    if: needs.changes.outputs.infra == 'true' || needs.changes.outputs.infra_fs == 'true'
     strategy:
       matrix:
         infra: [infra, infra-fs]
@@ -78,11 +178,17 @@ jobs:
       - name: Ruff lint
         run: uv run --directory ${{ matrix.infra }} --extra dev ruff check stacks/
 
-  # Unit tests
+  # ============================================================
+  # Unit tests (only when service code changed)
+  # ============================================================
   test:
     name: Test
     runs-on: ubuntu-latest
-    needs: [lint]
+    needs: [changes, lint]
+    if: |
+      always()
+      && needs.changes.outputs.services == 'true'
+      && (needs.lint.result == 'success' || needs.lint.result == 'skipped')
     strategy:
       matrix:
         include:
@@ -127,11 +233,17 @@ jobs:
         run: |
           uv run --directory ${{ matrix.service }} --extra dev pytest tests/ -v --tb=short
 
-  # CDK validation
+  # ============================================================
+  # CDK validation (only when infra code changed)
+  # ============================================================
   cdk-synth:
     name: CDK Synth
     runs-on: ubuntu-latest
-    needs: [lint-infra]
+    needs: [changes, lint-infra]
+    if: |
+      always()
+      && (needs.changes.outputs.infra == 'true' || needs.changes.outputs.infra_fs == 'true')
+      && (needs.lint-infra.result == 'success' || needs.lint-infra.result == 'skipped')
     strategy:
       matrix:
         infra: [infra, infra-fs]
@@ -155,13 +267,18 @@ jobs:
       - name: CDK synth
         run: uv run --directory ${{ matrix.infra }} cdk synth --quiet
 
-  # Security scanning (on PRs to main)
+  # ============================================================
+  # Security scanning — Python SAST + SCA (on PRs, when services changed)
+  # ============================================================
   security:
     name: Security Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.services == 'true'
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Install uv
         uses: astral-sh/setup-uv@v4
@@ -172,7 +289,7 @@ jobs:
       - name: Init failure log
         run: mkdir -p /tmp/security-output
 
-      # Semgrep - Advanced SAST (better than Bandit)
+      # Semgrep - Advanced SAST
       - name: Semgrep scan
         id: semgrep
         continue-on-error: true
@@ -207,7 +324,7 @@ jobs:
           uv export --directory scheduler --no-hashes --no-dev --frozen > /tmp/scheduler-reqs.txt
           uv tool run pip-audit -r /tmp/scheduler-reqs.txt || true
 
-      # Bandit - Python SAST (kept for comparison)
+      # Bandit - Python SAST
       - name: Install bandit
         run: uv tool install bandit
 
@@ -237,7 +354,7 @@ jobs:
             fi
           done
 
-      # Gitleaks - Secret scanning
+      # Gitleaks - Secret scanning (always runs on any code change)
       - name: Gitleaks secret scan
         id: gitleaks
         continue-on-error: true
@@ -262,12 +379,42 @@ jobs:
         if: steps.semgrep.outcome == 'failure' || steps.bandit_api.outcome == 'failure' || steps.bandit_worker.outcome == 'failure' || steps.bandit_scheduler.outcome == 'failure' || steps.gitleaks.outcome == 'failure'
         run: exit 1
 
-  # IaC Security Scanning
+  # ============================================================
+  # Secret scanning — runs on any code change even without service changes
+  # ============================================================
+  secret-scan:
+    name: Secret Scan
+    runs-on: ubuntu-latest
+    needs: [changes]
+    if: github.event_name == 'pull_request' && needs.changes.outputs.any_code == 'true' && needs.changes.outputs.services == 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Gitleaks secret scan
+        id: gitleaks
+        continue-on-error: true
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Fail if secrets found
+        if: steps.gitleaks.outcome == 'failure'
+        run: exit 1
+
+  # ============================================================
+  # IaC Security Scanning (on PRs, when infra changed)
+  # ============================================================
   iac-security:
     name: IaC Security Scan
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [cdk-synth]
+    needs: [changes, cdk-synth]
+    if: |
+      always()
+      && github.event_name == 'pull_request'
+      && (needs.changes.outputs.infra == 'true' || needs.changes.outputs.infra_fs == 'true')
+      && (needs.cdk-synth.result == 'success' || needs.cdk-synth.result == 'skipped')
     strategy:
       matrix:
         infra: [infra, infra-fs]
@@ -299,14 +446,21 @@ jobs:
           framework: cloudformation
           soft_fail: true
           output_format: cli
-          skip_check: CKV_AWS_18,CKV_AWS_21  # Skip S3 logging checks for dev
+          skip_check: CKV_AWS_18,CKV_AWS_21
 
-  # Container build validation (on PRs to main)
+  # ============================================================
+  # Container build validation (on PRs, when service code changed)
+  # ============================================================
   container-build:
     name: Container Build
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [test, cdk-synth]
+    needs: [changes, test, cdk-synth]
+    if: |
+      always()
+      && github.event_name == 'pull_request'
+      && needs.changes.outputs.services == 'true'
+      && (needs.test.result == 'success' || needs.test.result == 'skipped')
+      && (needs.cdk-synth.result == 'success' || needs.cdk-synth.result == 'skipped')
     strategy:
       matrix:
         service: [api, worker, scheduler]
@@ -326,12 +480,18 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # SBOM Generation (Software Bill of Materials)
+  # ============================================================
+  # Python SBOM (on PRs, when service code changed)
+  # ============================================================
   sbom:
     name: Generate & Scan SBOM
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [test]
+    needs: [changes, test]
+    if: |
+      always()
+      && github.event_name == 'pull_request'
+      && needs.changes.outputs.services == 'true'
+      && (needs.test.result == 'success' || needs.test.result == 'skipped')
     strategy:
       matrix:
         service: [api, worker, scheduler]
@@ -401,12 +561,18 @@ jobs:
         if: steps.trivy.outcome == 'failure'
         run: exit 1
 
-  # Frontend SBOM
+  # ============================================================
+  # Frontend SBOM (on PRs, when web/ changed)
+  # ============================================================
   sbom-web:
     name: Generate & Scan Frontend SBOM
     runs-on: ubuntu-latest
-    if: github.event_name == 'pull_request'
-    needs: [lint-web]
+    needs: [changes, lint-web]
+    if: |
+      always()
+      && github.event_name == 'pull_request'
+      && needs.changes.outputs.web == 'true'
+      && (needs.lint-web.result == 'success' || needs.lint-web.result == 'skipped')
     steps:
       - uses: actions/checkout@v4
 
@@ -473,11 +639,13 @@ jobs:
         if: steps.trivy.outcome == 'failure'
         run: exit 1
 
+  # ============================================================
   # Slack notification on failure
+  # ============================================================
   notify-failure:
     name: Notify on Failure
     runs-on: ubuntu-latest
-    needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
+    needs: [changes, lint, lint-web, lint-infra, test, cdk-synth, security, secret-scan, iac-security, container-build, sbom, sbom-web]
     if: failure() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
     steps:
       - name: Download security findings
@@ -491,7 +659,6 @@ jobs:
       - name: Build failure summary
         id: summary
         run: |
-          # Build failed jobs list (comma-separated, safe for JSON)
           FAILED_JOBS=""
           if [ "${{ needs.lint.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint, "; fi
           if [ "${{ needs.lint-web.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Lint Frontend, "; fi
@@ -499,6 +666,7 @@ jobs:
           if [ "${{ needs.test.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Tests, "; fi
           if [ "${{ needs.cdk-synth.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}CDK Synth, "; fi
           if [ "${{ needs.security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Security Scan, "; fi
+          if [ "${{ needs.secret-scan.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Secret Scan, "; fi
           if [ "${{ needs.iac-security.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}IaC Security, "; fi
           if [ "${{ needs.container-build.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}Container Build, "; fi
           if [ "${{ needs.sbom.result }}" = "failure" ]; then FAILED_JOBS="${FAILED_JOBS}SBOM Scan, "; fi
@@ -506,9 +674,9 @@ jobs:
           FAILED_JOBS="${FAILED_JOBS%, }"
           echo "failed_jobs=${FAILED_JOBS}" >> $GITHUB_OUTPUT
 
-          # Check if any security job specifically failed
           SEC_FAILED="false"
           if [ "${{ needs.security.result }}" = "failure" ] || \
+             [ "${{ needs.secret-scan.result }}" = "failure" ] || \
              [ "${{ needs.sbom.result }}" = "failure" ] || \
              [ "${{ needs.sbom-web.result }}" = "failure" ] || \
              [ "${{ needs.iac-security.result }}" = "failure" ]; then
@@ -522,7 +690,6 @@ jobs:
         run: |
           SCAN_OUTPUT="No details captured"
           if [ -d /tmp/findings ]; then
-            # Strip non-ASCII (box-drawing chars break Slack), truncate to 2500 chars
             RAW=$(find /tmp/findings -name 'findings.txt' -exec cat {} \; 2>/dev/null \
               | LC_ALL=C tr -cd '[:print:]\n' \
               | head -40 \
@@ -615,13 +782,32 @@ jobs:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
           SLACK_WEBHOOK_TYPE: INCOMING_WEBHOOK
 
+  # ============================================================
   # Slack notification on success
+  # ============================================================
   notify-success:
     name: Notify on Success
     runs-on: ubuntu-latest
-    needs: [lint, lint-web, lint-infra, test, cdk-synth, security, iac-security, container-build, sbom, sbom-web]
-    if: success() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'
+    needs: [changes, lint, lint-web, lint-infra, test, cdk-synth, security, secret-scan, iac-security, container-build, sbom, sbom-web]
+    if: "!failure() && !cancelled() && github.event_name == 'pull_request' && github.actor != 'dependabot[bot]'"
     steps:
+      - name: Build summary
+        id: summary
+        run: |
+          RAN=""
+          if [ "${{ needs.lint.result }}" = "success" ]; then RAN="${RAN}Lint ✅ "; fi
+          if [ "${{ needs.lint-web.result }}" = "success" ]; then RAN="${RAN}Frontend ✅ "; fi
+          if [ "${{ needs.lint-infra.result }}" = "success" ]; then RAN="${RAN}Infra ✅ "; fi
+          if [ "${{ needs.test.result }}" = "success" ]; then RAN="${RAN}Tests ✅ "; fi
+          if [ "${{ needs.cdk-synth.result }}" = "success" ]; then RAN="${RAN}CDK ✅ "; fi
+          if [ "${{ needs.security.result }}" = "success" ]; then RAN="${RAN}Security ✅ "; fi
+          if [ "${{ needs.secret-scan.result }}" = "success" ]; then RAN="${RAN}Secrets ✅ "; fi
+          if [ "${{ needs.iac-security.result }}" = "success" ]; then RAN="${RAN}IaC ✅ "; fi
+          if [ "${{ needs.container-build.result }}" = "success" ]; then RAN="${RAN}Containers ✅ "; fi
+          if [ "${{ needs.sbom.result }}" = "success" ]; then RAN="${RAN}SBOM ✅ "; fi
+          if [ "${{ needs.sbom-web.result }}" = "success" ]; then RAN="${RAN}Web-SBOM ✅ "; fi
+          echo "ran=${RAN:-No jobs needed}" >> $GITHUB_OUTPUT
+
       - name: Send Slack notification
         uses: slackapi/slack-github-action@v1.26.0
         with:
@@ -647,7 +833,7 @@ jobs:
                   "type": "section",
                   "fields": [
                     {"type": "mrkdwn", "text": "*PR:*\n#${{ github.event.pull_request.number }}"},
-                    {"type": "mrkdwn", "text": "*Author:*\n${{ github.event.pull_request.user.login }}"}
+                    {"type": "mrkdwn", "text": "*Jobs:*\n${{ steps.summary.outputs.ran }}"}
                   ]
                 },
                 {

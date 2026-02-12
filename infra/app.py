@@ -8,6 +8,7 @@ from stacks.compliance_stack import ComplianceStack
 from stacks.compute_stack import ComputeStack
 from stacks.data_stack import DataStack
 from stacks.edge_stack import EdgeStack
+from stacks.frontend_stack import FrontendStack
 from stacks.github_oidc_stack import GitHubOIDCStack
 from stacks.network_stack import NetworkStack
 from stacks.observability_stack import ObservabilityStack
@@ -103,5 +104,19 @@ edge_stack = EdgeStack(
     env=cdk.Environment(account=env.account, region="us-east-1"),
 )
 edge_stack.add_dependency(compute_stack)
+
+# --- Frontend (Amplify Hosting) ---
+
+frontend_stack = FrontendStack(
+    app,
+    "FrontendStack",
+    env=env,
+    cognito_user_pool_id=auth_stack.user_pool.user_pool_id,
+    cognito_client_id=auth_stack.user_pool_client.user_pool_client_id,
+    cognito_domain="omnichannel-auth.auth.us-east-1.amazoncognito.com",
+    api_url=cdk.Fn.join("", ["https://", cdk.Fn.import_value("SecureApiDistributionDomain")]),
+)
+frontend_stack.add_dependency(auth_stack)
+frontend_stack.add_dependency(edge_stack)
 
 app.synth()
