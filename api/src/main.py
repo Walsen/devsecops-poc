@@ -28,8 +28,7 @@ async def lifespan(app: FastAPI):
 
     # Initialize database
     db = get_database()
-    if settings.debug:
-        await db.create_tables()
+    await db.create_tables()
 
     yield
 
