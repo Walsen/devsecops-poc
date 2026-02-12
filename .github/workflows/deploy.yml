@@ -3,6 +3,14 @@ name: Deploy
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - '.gitignore'
+      - '.gitleaks.toml'
+      - 'scripts/**'
+      - 'ruff.toml'
+      - '.vscode/**'
   workflow_dispatch:
     inputs:
       environment:
@@ -22,6 +30,11 @@ on:
         options:
           - containers    # ECS Fargate (infra/)
           - serverless    # Lambda + DynamoDB (infra-fs/)
+      force_all:
+        description: 'Force full pipeline (ignore path filters)'
+        required: false
+        default: false
+        type: boolean
 
 env:
   AWS_REGION: us-east-1
@@ -29,13 +42,85 @@ env:
   ECR_REGISTRY: ${{ secrets.AWS_ACCOUNT_ID }}.dkr.ecr.us-east-1.amazonaws.com
 
 jobs:
+  # ============================================================
+  # Detect what changed to skip unnecessary jobs
+  # ============================================================
+  changes:
+    name: Detect Changes
+    runs-on: ubuntu-latest
+    outputs:
+      services: ${{ steps.filter.outputs.services }}
+      infra: ${{ steps.filter.outputs.infra }}
+      infra_fs: ${{ steps.filter.outputs.infra_fs }}
+      web: ${{ steps.filter.outputs.web }}
+      lambdas: ${{ steps.filter.outputs.lambdas }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Detect changed paths
+        id: filter
+        run: |
+          if [ "${{ inputs.force_all }}" = "true" ] || [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "services=true" >> $GITHUB_OUTPUT
+            echo "infra=true" >> $GITHUB_OUTPUT
+            echo "infra_fs=true" >> $GITHUB_OUTPUT
+            echo "web=true" >> $GITHUB_OUTPUT
+            echo "lambdas=true" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          CHANGED=$(git diff --name-only HEAD~1 HEAD 2>/dev/null || echo "")
+
+          # Service code (api/, worker/, scheduler/) — need Docker rebuild
+          if echo "$CHANGED" | grep -qE '^(api|worker|scheduler)/'; then
+            echo "services=true" >> $GITHUB_OUTPUT
+          else
+            echo "services=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Container infra (infra/)
+          if echo "$CHANGED" | grep -qE '^infra/'; then
+            echo "infra=true" >> $GITHUB_OUTPUT
+          else
+            echo "infra=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Serverless infra (infra-fs/)
+          if echo "$CHANGED" | grep -qE '^infra-fs/'; then
+            echo "infra_fs=true" >> $GITHUB_OUTPUT
+          else
+            echo "infra_fs=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Frontend (web/)
+          if echo "$CHANGED" | grep -qE '^web/'; then
+            echo "web=true" >> $GITHUB_OUTPUT
+          else
+            echo "web=false" >> $GITHUB_OUTPUT
+          fi
+
+          # Lambda handlers (api-lambda/, worker-lambda/, scheduler-lambda/)
+          if echo "$CHANGED" | grep -qE '^(api-lambda|worker-lambda|scheduler-lambda)/'; then
+            echo "lambdas=true" >> $GITHUB_OUTPUT
+          else
+            echo "lambdas=false" >> $GITHUB_OUTPUT
+          fi
+
+  # ============================================================
   # Determine infrastructure type
+  # ============================================================
   setup:
     name: Setup
     runs-on: ubuntu-latest
+    needs: [changes]
     outputs:
       infra_type: ${{ steps.set-infra.outputs.infra_type }}
       infra_dir: ${{ steps.set-infra.outputs.infra_dir }}
+      need_containers: ${{ steps.set-infra.outputs.need_containers }}
+      need_cdk: ${{ steps.set-infra.outputs.need_cdk }}
+      need_serverless_cdk: ${{ steps.set-infra.outputs.need_serverless_cdk }}
     steps:
       - name: Set infrastructure type
         id: set-infra
@@ -49,12 +134,43 @@ jobs:
             echo "infra_dir=infra" >> $GITHUB_OUTPUT
           fi
 
+          # For containers mode: need Docker builds if service code changed
+          SERVICES="${{ needs.changes.outputs.services }}"
+          INFRA="${{ needs.changes.outputs.infra }}"
+          WEB="${{ needs.changes.outputs.web }}"
+
+          if [ "$INFRA_TYPE_INPUT" == "containers" ]; then
+            # Need container builds when service code changes
+            echo "need_containers=$SERVICES" >> $GITHUB_OUTPUT
+            # Need CDK when infra, services, or web changed
+            if [ "$INFRA" = "true" ] || [ "$SERVICES" = "true" ] || [ "$WEB" = "true" ]; then
+              echo "need_cdk=true" >> $GITHUB_OUTPUT
+            else
+              echo "need_cdk=false" >> $GITHUB_OUTPUT
+            fi
+            echo "need_serverless_cdk=false" >> $GITHUB_OUTPUT
+          else
+            echo "need_containers=false" >> $GITHUB_OUTPUT
+            echo "need_cdk=false" >> $GITHUB_OUTPUT
+            # Need serverless CDK when infra-fs, lambdas, or web changed
+            INFRA_FS="${{ needs.changes.outputs.infra_fs }}"
+            LAMBDAS="${{ needs.changes.outputs.lambdas }}"
+            if [ "$INFRA_FS" = "true" ] || [ "$LAMBDAS" = "true" ] || [ "$WEB" = "true" ]; then
+              echo "need_serverless_cdk=true" >> $GITHUB_OUTPUT
+            else
+              echo "need_serverless_cdk=false" >> $GITHUB_OUTPUT
+            fi
+          fi
+
+
+  # ============================================================
   # Deploy ECR repositories (must exist before container builds)
+  # ============================================================
   deploy-registry:
     name: Deploy Registry
     runs-on: ubuntu-latest
     needs: [setup]
-    if: needs.setup.outputs.infra_type == 'containers'
+    if: needs.setup.outputs.need_containers == 'true'
     permissions:
       id-token: write
       contents: read
@@ -86,12 +202,14 @@ jobs:
           uv run --directory infra cdk deploy RegistryStack \
             --require-approval never
 
-  # Build and push container images (only for containers infra)
+  # ============================================================
+  # Build and push container images (only when service code changed)
+  # ============================================================
   build-and-push:
     name: Build & Push
     runs-on: ubuntu-latest
     needs: [setup, deploy-registry]
-    if: needs.setup.outputs.infra_type == 'containers'
+    if: needs.setup.outputs.need_containers == 'true'
     permissions:
       id-token: write
       contents: read
@@ -137,12 +255,74 @@ jobs:
           cache-to: type=gha,mode=max
           provenance: true
 
-  # Deploy CDK infrastructure
+  # ============================================================
+  # Save ECS desired counts before CDK deploy (prevent reset to 0)
+  # ============================================================
+  save-ecs-state:
+    name: Save ECS State
+    runs-on: ubuntu-latest
+    needs: [setup]
+    if: needs.setup.outputs.infra_type == 'containers' && needs.setup.outputs.need_cdk == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    outputs:
+      api_count: ${{ steps.counts.outputs.api }}
+      worker_count: ${{ steps.counts.outputs.worker }}
+      scheduler_count: ${{ steps.counts.outputs.scheduler }}
+      cluster_arn: ${{ steps.counts.outputs.cluster }}
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Read current desired counts
+        id: counts
+        run: |
+          CLUSTER=$(aws ecs list-clusters \
+            --query "clusterArns[?contains(@, 'ComputeStack')]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CLUSTER" ]; then
+            echo "No ECS cluster found, using defaults"
+            echo "api=0" >> $GITHUB_OUTPUT
+            echo "worker=0" >> $GITHUB_OUTPUT
+            echo "scheduler=0" >> $GITHUB_OUTPUT
+            echo "cluster=" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
+
+          for svc_name in api worker scheduler; do
+            COUNT=$(aws ecs describe-services \
+              --cluster "$CLUSTER" \
+              --services "${svc_name}-service" \
+              --query "services[0].desiredCount" \
+              --output text 2>/dev/null || echo "0")
+            # Treat MISSING or empty as 0
+            if [ "$COUNT" = "None" ] || [ -z "$COUNT" ]; then
+              COUNT=0
+            fi
+            echo "${svc_name}=${COUNT}" >> $GITHUB_OUTPUT
+            echo "  ${svc_name}-service desired count: ${COUNT}"
+          done
+
+  # ============================================================
+  # Deploy CDK infrastructure (containers mode)
+  # ============================================================
   deploy-cdk:
     name: Deploy CDK
     runs-on: ubuntu-latest
-    needs: [setup, build-and-push]
-    if: always() && needs.setup.result == 'success' && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+    needs: [setup, changes, build-and-push, save-ecs-state]
+    if: |
+      always()
+      && needs.setup.result == 'success'
+      && needs.setup.outputs.need_cdk == 'true'
+      && (needs.build-and-push.result == 'success' || needs.build-and-push.result == 'skipped')
+      && (needs.save-ecs-state.result == 'success' || needs.save-ecs-state.result == 'skipped')
     permissions:
       id-token: write
       contents: read
@@ -171,18 +351,41 @@ jobs:
       - name: Install CDK
         run: npm install -g aws-cdk
 
-      - name: Determine stack names
+      - name: Determine stacks to deploy
         id: stacks
         run: |
-          if [ "${{ needs.setup.outputs.infra_type }}" == "serverless" ]; then
-            echo "names=OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack" >> $GITHUB_OUTPUT
-          else
-            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ComplianceStack ThreatDetectionStack" >> $GITHUB_OUTPUT
+          SERVICES="${{ needs.changes.outputs.services }}"
+          INFRA="${{ needs.changes.outputs.infra }}"
+          WEB="${{ needs.changes.outputs.web }}"
+          IS_DISPATCH="${{ github.event_name == 'workflow_dispatch' }}"
+
+          # Always deploy these core stacks when infra changes or manual dispatch
+          if [ "$INFRA" = "true" ] || [ "$IS_DISPATCH" = "true" ]; then
+            echo "names=NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack ComplianceStack ThreatDetectionStack FrontendStack" >> $GITHUB_OUTPUT
+            exit 0
           fi
+
+          STACKS=""
+
+          # Service code changed — need ComputeStack for new task definitions
+          if [ "$SERVICES" = "true" ]; then
+            STACKS="NetworkStack SecurityStack AuthStack DataStack ComputeStack ObservabilityStack"
+          fi
+
+          # Frontend changed — need FrontendStack (Amplify env vars)
+          if [ "$WEB" = "true" ]; then
+            if [ -z "$STACKS" ]; then
+              STACKS="FrontendStack"
+            else
+              STACKS="$STACKS FrontendStack"
+            fi
+          fi
+
+          echo "names=$STACKS" >> $GITHUB_OUTPUT
 
       - name: CDK diff
         run: |
-          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk diff \
+          uv run --directory infra cdk diff \
             --exclusively \
             -c image_tag=${{ github.sha }} \
             ${{ steps.stacks.outputs.names }} \
@@ -190,17 +393,147 @@ jobs:
 
       - name: CDK deploy
         run: |
-          uv run --directory ${{ needs.setup.outputs.infra_dir }} cdk deploy \
+          uv run --directory infra cdk deploy \
             --require-approval never \
             -c image_tag=${{ github.sha }} \
             ${{ steps.stacks.outputs.names }}
 
-  # Update ECS services (only for containers infra)
+  # ============================================================
+  # Deploy CDK infrastructure (serverless mode)
+  # ============================================================
+  deploy-cdk-serverless:
+    name: Deploy CDK (Serverless)
+    runs-on: ubuntu-latest
+    needs: [setup, changes]
+    if: needs.setup.outputs.need_serverless_cdk == 'true'
+    permissions:
+      id-token: write
+      contents: read
+    environment: ${{ inputs.environment || 'dev' }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v4
+
+      - name: Set up Python
+        run: uv python install ${{ env.PYTHON_VERSION }}
+
+      - name: Install CDK
+        run: npm install -g aws-cdk
+
+      - name: Determine stacks to deploy
+        id: stacks
+        run: |
+          INFRA_FS="${{ needs.changes.outputs.infra_fs }}"
+          LAMBDAS="${{ needs.changes.outputs.lambdas }}"
+          WEB="${{ needs.changes.outputs.web }}"
+          IS_DISPATCH="${{ github.event_name == 'workflow_dispatch' }}"
+
+          if [ "$INFRA_FS" = "true" ] || [ "$IS_DISPATCH" = "true" ]; then
+            echo "names=OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack OmnichannelFrontendStack" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          STACKS=""
+
+          if [ "$LAMBDAS" = "true" ]; then
+            STACKS="OmnichannelDataStack OmnichannelAuthStack OmnichannelApiStack OmnichannelWorkerStack OmnichannelSchedulerStack OmnichannelMonitoringStack OmnichannelSecurityStack"
+          fi
+
+          if [ "$WEB" = "true" ]; then
+            if [ -z "$STACKS" ]; then
+              STACKS="OmnichannelFrontendStack"
+            else
+              STACKS="$STACKS OmnichannelFrontendStack"
+            fi
+          fi
+
+          echo "names=$STACKS" >> $GITHUB_OUTPUT
+
+      - name: CDK diff
+        run: |
+          uv run --directory infra-fs cdk diff \
+            --exclusively \
+            ${{ steps.stacks.outputs.names }} \
+            || true
+
+      - name: CDK deploy
+        run: |
+          uv run --directory infra-fs cdk deploy \
+            --require-approval never \
+            ${{ steps.stacks.outputs.names }}
+
+  # ============================================================
+  # Restore ECS desired counts (prevent CDK resetting to 0)
+  # ============================================================
+  restore-ecs-state:
+    name: Restore ECS State
+    runs-on: ubuntu-latest
+    needs: [setup, save-ecs-state, deploy-cdk]
+    if: |
+      always()
+      && needs.deploy-cdk.result == 'success'
+      && needs.save-ecs-state.result == 'success'
+      && needs.save-ecs-state.outputs.cluster_arn != ''
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_DEPLOY_ROLE_ARN }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Restore desired counts
+        env:
+          CLUSTER: ${{ needs.save-ecs-state.outputs.cluster_arn }}
+          API_COUNT: ${{ needs.save-ecs-state.outputs.api_count }}
+          WORKER_COUNT: ${{ needs.save-ecs-state.outputs.worker_count }}
+          SCHEDULER_COUNT: ${{ needs.save-ecs-state.outputs.scheduler_count }}
+        run: |
+          echo "Restoring ECS desired counts..."
+          for pair in "api-service:$API_COUNT" "worker-service:$WORKER_COUNT" "scheduler-service:$SCHEDULER_COUNT"; do
+            SVC="${pair%%:*}"
+            COUNT="${pair##*:}"
+            if [ "$COUNT" != "0" ] && [ -n "$COUNT" ]; then
+              echo "  Restoring $SVC to desired=$COUNT"
+              aws ecs update-service \
+                --cluster "$CLUSTER" \
+                --service "$SVC" \
+                --desired-count "$COUNT" \
+                --no-cli-pager > /dev/null
+            else
+              echo "  $SVC was at 0, leaving as-is"
+            fi
+          done
+          echo "Done"
+
+  # ============================================================
+  # Force new deployment on ECS services (only when images changed)
+  # ============================================================
   deploy-services:
     name: Deploy Services
     runs-on: ubuntu-latest
-    needs: [setup, deploy-cdk]
-    if: needs.setup.outputs.infra_type == 'containers'
+    needs: [setup, changes, deploy-cdk, restore-ecs-state]
+    if: |
+      always()
+      && needs.setup.outputs.infra_type == 'containers'
+      && needs.changes.outputs.services == 'true'
+      && needs.deploy-cdk.result == 'success'
     permissions:
       id-token: write
       contents: read
@@ -232,12 +565,18 @@ jobs:
             --services api-service worker-service scheduler-service \
             --no-cli-pager || echo "Timeout waiting for services"
 
-  # Run database migrations (only for containers infra with RDS)
+  # ============================================================
+  # Run database migrations (only when service code changed)
+  # ============================================================
   migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [setup, deploy-services]
-    if: needs.setup.outputs.infra_type == 'containers'
+    needs: [setup, changes, deploy-services]
+    if: |
+      always()
+      && needs.setup.outputs.infra_type == 'containers'
+      && needs.changes.outputs.services == 'true'
+      && needs.deploy-services.result == 'success'
     permissions:
       id-token: write
       contents: read
@@ -255,38 +594,34 @@ jobs:
       - name: Get network configuration from CloudFormation
         id: network
         run: |
-          # Get VPC ID from NetworkStack
           VPC_ID=$(aws cloudformation describe-stacks \
             --stack-name NetworkStack \
             --query "Stacks[0].Outputs[?OutputKey=='VpcId'].OutputValue" \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -z "$VPC_ID" ]; then
             echo "NetworkStack not found, skipping migrations"
             echo "skip=true" >> $GITHUB_OUTPUT
             exit 0
           fi
-          
-          # Get private subnets
+
           SUBNETS=$(aws ec2 describe-subnets \
             --filters "Name=vpc-id,Values=$VPC_ID" "Name=tag:aws-cdk:subnet-type,Values=Private" \
             --query "Subnets[*].SubnetId" \
             --output text | tr '\t' ',')
-          
-          # Get security group from ComputeStack
+
           SG_ID=$(aws cloudformation describe-stacks \
             --stack-name ComputeStack \
             --query "Stacks[0].Outputs[?OutputKey=='ServiceSecurityGroupId'].OutputValue" \
             --output text 2>/dev/null || echo "")
-          
+
           if [ -z "$SG_ID" ]; then
-            # Fallback: find by tag
             SG_ID=$(aws ec2 describe-security-groups \
               --filters "Name=vpc-id,Values=$VPC_ID" "Name=description,Values=*Fargate services*" \
               --query "SecurityGroups[0].GroupId" \
               --output text 2>/dev/null || echo "")
           fi
-          
+
           echo "subnets=$SUBNETS" >> $GITHUB_OUTPUT
           echo "security_group=$SG_ID" >> $GITHUB_OUTPUT
           echo "skip=false" >> $GITHUB_OUTPUT
@@ -301,13 +636,17 @@ jobs:
             --network-configuration "awsvpcConfiguration={subnets=[${{ steps.network.outputs.subnets }}],securityGroups=[${{ steps.network.outputs.security_group }}],assignPublicIp=DISABLED}" \
             --no-cli-pager || echo "Migration task not configured yet"
 
+  # ============================================================
   # Deploy EdgeStack (CloudFront + WAF) - manual trigger only
-  # CloudFront takes 15-30 min to provision, so it's deployed separately
+  # ============================================================
   deploy-edge:
     name: Deploy Edge (CloudFront + WAF)
     runs-on: ubuntu-latest
     needs: [setup, deploy-cdk]
-    if: needs.setup.outputs.infra_type == 'containers' && github.event_name == 'workflow_dispatch'
+    if: |
+      needs.setup.outputs.infra_type == 'containers'
+      && github.event_name == 'workflow_dispatch'
+      && needs.deploy-cdk.result == 'success'
     permissions:
       id-token: write
       contents: read
@@ -342,36 +681,66 @@ jobs:
             --require-approval never \
             -c image_tag=${{ github.sha }}
 
+  # ============================================================
   # Notify on completion
+  # ============================================================
   notify:
     name: Notify
     runs-on: ubuntu-latest
-    needs: [setup, build-and-push, deploy-cdk, deploy-services, migrate]
+    needs: [setup, changes, build-and-push, deploy-cdk, deploy-cdk-serverless, restore-ecs-state, deploy-services, migrate]
     if: always()
     steps:
       - name: Determine deploy result
         id: result
         run: |
-          # Check all job results
           BUILD="${{ needs.build-and-push.result }}"
           CDK="${{ needs.deploy-cdk.result }}"
+          CDK_SL="${{ needs.deploy-cdk-serverless.result }}"
           SERVICES="${{ needs.deploy-services.result }}"
           MIGRATE="${{ needs.migrate.result }}"
+          RESTORE="${{ needs.restore-ecs-state.result }}"
 
-          if [ "$BUILD" = "failure" ] || [ "$CDK" = "failure" ] || \
-             [ "$SERVICES" = "failure" ] || [ "$MIGRATE" = "failure" ]; then
+          # Check for actual failures (not skipped)
+          FAILED="false"
+          for r in "$BUILD" "$CDK" "$CDK_SL" "$SERVICES" "$MIGRATE" "$RESTORE"; do
+            if [ "$r" = "failure" ]; then
+              FAILED="true"
+              break
+            fi
+          done
+
+          # Check if anything actually ran
+          ALL_SKIPPED="true"
+          for r in "$BUILD" "$CDK" "$CDK_SL" "$SERVICES" "$MIGRATE"; do
+            if [ "$r" != "skipped" ]; then
+              ALL_SKIPPED="false"
+              break
+            fi
+          done
+
+          if [ "$FAILED" = "true" ]; then
             echo "status=failure" >> $GITHUB_OUTPUT
             echo "emoji=❌" >> $GITHUB_OUTPUT
             echo "text=Deploy Failed" >> $GITHUB_OUTPUT
-          elif [ "$CDK" = "skipped" ] && [ "$BUILD" = "failure" ]; then
-            echo "status=failure" >> $GITHUB_OUTPUT
-            echo "emoji=❌" >> $GITHUB_OUTPUT
-            echo "text=Deploy Failed (build step)" >> $GITHUB_OUTPUT
+          elif [ "$ALL_SKIPPED" = "true" ]; then
+            echo "status=skipped" >> $GITHUB_OUTPUT
+            echo "emoji=⏭️" >> $GITHUB_OUTPUT
+            echo "text=Deploy Skipped (no relevant changes)" >> $GITHUB_OUTPUT
           else
             echo "status=success" >> $GITHUB_OUTPUT
             echo "emoji=✅" >> $GITHUB_OUTPUT
             echo "text=Deploy Succeeded" >> $GITHUB_OUTPUT
           fi
+
+          # Build summary of what ran
+          SUMMARY=""
+          if [ "$BUILD" = "success" ]; then SUMMARY="${SUMMARY}Containers ✅ "; fi
+          if [ "$CDK" = "success" ]; then SUMMARY="${SUMMARY}CDK ✅ "; fi
+          if [ "$CDK_SL" = "success" ]; then SUMMARY="${SUMMARY}CDK-Serverless ✅ "; fi
+          if [ "$RESTORE" = "success" ]; then SUMMARY="${SUMMARY}ECS-Restored ✅ "; fi
+          if [ "$SERVICES" = "success" ]; then SUMMARY="${SUMMARY}ECS-Deploy ✅ "; fi
+          if [ "$MIGRATE" = "success" ]; then SUMMARY="${SUMMARY}Migrations ✅ "; fi
+          echo "summary=${SUMMARY:-No jobs ran}" >> $GITHUB_OUTPUT
 
       - name: Slack notification
         uses: slackapi/slack-github-action@v1.26.0
@@ -398,7 +767,7 @@ jobs:
                   "type": "section",
                   "fields": [
                     {"type": "mrkdwn", "text": "*Infra:*\n${{ needs.setup.outputs.infra_type }}"},
-                    {"type": "mrkdwn", "text": "*Commit:*\n${{ github.sha }}"}
+                    {"type": "mrkdwn", "text": "*Jobs:*\n${{ steps.result.outputs.summary }}"}
                   ]
                 },
                 {
