@@ -270,7 +270,7 @@ jobs:
       api_count: ${{ steps.counts.outputs.api }}
       worker_count: ${{ steps.counts.outputs.worker }}
       scheduler_count: ${{ steps.counts.outputs.scheduler }}
-      cluster_arn: ${{ steps.counts.outputs.cluster }}
+      has_cluster: ${{ steps.counts.outputs.has_cluster }}
     steps:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
@@ -290,24 +290,37 @@ jobs:
             echo "api=0" >> $GITHUB_OUTPUT
             echo "worker=0" >> $GITHUB_OUTPUT
             echo "scheduler=0" >> $GITHUB_OUTPUT
-            echo "cluster=" >> $GITHUB_OUTPUT
+            echo "has_cluster=false" >> $GITHUB_OUTPUT
             exit 0
           fi
 
-          echo "cluster=$CLUSTER" >> $GITHUB_OUTPUT
+          echo "has_cluster=true" >> $GITHUB_OUTPUT
 
-          for svc_name in api worker scheduler; do
+          # Discover actual service ARNs dynamically (CDK generates unique names)
+          SVCS=$(aws ecs list-services --cluster "$CLUSTER" --query "serviceArns[]" --output text 2>/dev/null || true)
+
+          for svc_arn in $SVCS; do
+            SVC_NAME=$(echo "$svc_arn" | awk -F'/' '{print $NF}')
             COUNT=$(aws ecs describe-services \
               --cluster "$CLUSTER" \
-              --services "${svc_name}-service" \
+              --services "$svc_arn" \
               --query "services[0].desiredCount" \
               --output text 2>/dev/null || echo "0")
-            # Treat MISSING or empty as 0
             if [ "$COUNT" = "None" ] || [ -z "$COUNT" ]; then
               COUNT=0
             fi
-            echo "${svc_name}=${COUNT}" >> $GITHUB_OUTPUT
-            echo "  ${svc_name}-service desired count: ${COUNT}"
+
+            # Map CDK service name to logical name for outputs
+            if echo "$SVC_NAME" | grep -qi "api"; then
+              echo "api=${COUNT}" >> $GITHUB_OUTPUT
+              echo "  api ($SVC_NAME) desired count: ${COUNT}"
+            elif echo "$SVC_NAME" | grep -qi "worker"; then
+              echo "worker=${COUNT}" >> $GITHUB_OUTPUT
+              echo "  worker ($SVC_NAME) desired count: ${COUNT}"
+            elif echo "$SVC_NAME" | grep -qi "scheduler"; then
+              echo "scheduler=${COUNT}" >> $GITHUB_OUTPUT
+              echo "  scheduler ($SVC_NAME) desired count: ${COUNT}"
+            fi
           done
 
   # ============================================================
@@ -487,7 +500,7 @@ jobs:
       always()
       && needs.deploy-cdk.result == 'success'
       && needs.save-ecs-state.result == 'success'
-      && needs.save-ecs-state.outputs.cluster_arn != ''
+      && needs.save-ecs-state.outputs.has_cluster == 'true'
     permissions:
       id-token: write
       contents: read
@@ -500,24 +513,45 @@ jobs:
 
       - name: Restore desired counts
         env:
-          CLUSTER: ${{ needs.save-ecs-state.outputs.cluster_arn }}
           API_COUNT: ${{ needs.save-ecs-state.outputs.api_count }}
           WORKER_COUNT: ${{ needs.save-ecs-state.outputs.worker_count }}
           SCHEDULER_COUNT: ${{ needs.save-ecs-state.outputs.scheduler_count }}
         run: |
           echo "Restoring ECS desired counts..."
-          for pair in "api-service:$API_COUNT" "worker-service:$WORKER_COUNT" "scheduler-service:$SCHEDULER_COUNT"; do
-            SVC="${pair%%:*}"
-            COUNT="${pair##*:}"
-            if [ "$COUNT" != "0" ] && [ -n "$COUNT" ]; then
-              echo "  Restoring $SVC to desired=$COUNT"
+
+          CLUSTER=$(aws ecs list-clusters \
+            --query "clusterArns[?contains(@, 'ComputeStack')]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CLUSTER" ]; then
+            echo "No ECS cluster found, skipping restore"
+            exit 0
+          fi
+
+          # Discover actual service ARNs dynamically
+          SVCS=$(aws ecs list-services --cluster "$CLUSTER" --query "serviceArns[]" --output text 2>/dev/null || true)
+
+          for svc_arn in $SVCS; do
+            SVC_NAME=$(echo "$svc_arn" | awk -F'/' '{print $NF}')
+            TARGET_COUNT=0
+
+            if echo "$SVC_NAME" | grep -qi "api"; then
+              TARGET_COUNT="$API_COUNT"
+            elif echo "$SVC_NAME" | grep -qi "worker"; then
+              TARGET_COUNT="$WORKER_COUNT"
+            elif echo "$SVC_NAME" | grep -qi "scheduler"; then
+              TARGET_COUNT="$SCHEDULER_COUNT"
+            fi
+
+            if [ "$TARGET_COUNT" != "0" ] && [ -n "$TARGET_COUNT" ]; then
+              echo "  Restoring $SVC_NAME to desired=$TARGET_COUNT"
               aws ecs update-service \
                 --cluster "$CLUSTER" \
-                --service "$SVC" \
-                --desired-count "$COUNT" \
+                --service "$svc_arn" \
+                --desired-count "$TARGET_COUNT" \
                 --no-cli-pager > /dev/null
             else
-              echo "  $SVC was at 0, leaving as-is"
+              echo "  $SVC_NAME was at 0, leaving as-is"
             fi
           done
           echo "Done"
@@ -550,19 +584,37 @@ jobs:
 
       - name: Update ECS services
         run: |
-          for service in api worker scheduler; do
+          CLUSTER=$(aws ecs list-clusters \
+            --query "clusterArns[?contains(@, 'ComputeStack')]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CLUSTER" ]; then
+            echo "No ECS cluster found, skipping"
+            exit 0
+          fi
+
+          for svc_arn in $(aws ecs list-services --cluster "$CLUSTER" --query "serviceArns[]" --output text); do
+            SVC_NAME=$(echo "$svc_arn" | awk -F'/' '{print $NF}')
+            echo "Force new deployment: $SVC_NAME"
             aws ecs update-service \
-              --cluster secure-api-cluster \
-              --service ${service}-service \
+              --cluster "$CLUSTER" \
+              --service "$svc_arn" \
               --force-new-deployment \
-              --no-cli-pager || true
+              --no-cli-pager > /dev/null || true
           done
 
       - name: Wait for deployment
         run: |
+          CLUSTER=$(aws ecs list-clusters \
+            --query "clusterArns[?contains(@, 'ComputeStack')]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CLUSTER" ]; then exit 0; fi
+
+          SVCS=$(aws ecs list-services --cluster "$CLUSTER" --query "serviceArns[]" --output text)
           aws ecs wait services-stable \
-            --cluster secure-api-cluster \
-            --services api-service worker-service scheduler-service \
+            --cluster "$CLUSTER" \
+            --services $SVCS \
             --no-cli-pager || echo "Timeout waiting for services"
 
   # ============================================================

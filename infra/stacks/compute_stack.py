@@ -172,7 +172,7 @@ class ComputeStack(Stack):
             "ApiService",
             cluster=self.cluster,
             task_definition=api_task_def,
-            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
+            desired_count=1,
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="api"),
@@ -214,7 +214,7 @@ class ComputeStack(Stack):
             "WorkerService",
             cluster=self.cluster,
             task_definition=worker_task_def,
-            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
+            desired_count=1,
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="worker"),
@@ -256,7 +256,7 @@ class ComputeStack(Stack):
             "SchedulerService",
             cluster=self.cluster,
             task_definition=scheduler_task_def,
-            desired_count=0,  # Dev: start at 0 to save costs, scale up with `just aws-up`
+            desired_count=1,
             security_groups=[self.service_security_group],
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             cloud_map_options=ecs.CloudMapOptions(name="scheduler"),
