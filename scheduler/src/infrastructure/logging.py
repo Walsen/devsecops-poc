@@ -7,6 +7,8 @@ Centralized logging setup with:
 - Performance timing helpers
 """
 
+import logging
+import sys
 import time
 from contextvars import ContextVar
 
@@ -23,6 +25,12 @@ def configure_logging(service_name: str) -> None:
     Args:
         service_name: Name of the service for log context
     """
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.INFO,
+    )
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
