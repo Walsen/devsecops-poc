@@ -11,6 +11,9 @@ from aws_cdk import (
     aws_cloudfront_origins as origins,
 )
 from aws_cdk import (
+    aws_logs as logs,
+)
+from aws_cdk import (
     aws_s3 as s3,
 )
 from aws_cdk import (
@@ -146,6 +149,25 @@ class EdgeStack(Stack):
                     ),
                 ),
             ],
+        )
+
+        # ============================================================
+        # WAF Logging → CloudWatch Logs (Golden Thread tracing)
+        # ============================================================
+        # Log group name MUST start with "aws-waf-logs-" per AWS requirement
+        self.waf_log_group = logs.LogGroup(
+            self,
+            "CloudFrontWafLogGroup",
+            log_group_name="aws-waf-logs-cloudfront",
+            retention=logs.RetentionDays.ONE_MONTH,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
+        wafv2.CfnLoggingConfiguration(
+            self,
+            "CloudFrontWafLogging",
+            resource_arn=cloudfront_waf.attr_arn,
+            log_destination_configs=[self.waf_log_group.log_group_arn],
         )
 
         # Logging bucket for CloudFront access logs

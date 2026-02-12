@@ -111,6 +111,21 @@ class ComputeStack(Stack):
             web_acl_arn=web_acl.attr_arn,
         )
 
+        # WAF Logging → CloudWatch Logs (Golden Thread tracing)
+        self.waf_log_group = logs.LogGroup(
+            self,
+            "AlbWafLogGroup",
+            log_group_name="aws-waf-logs-alb",
+            retention=logs.RetentionDays.ONE_MONTH,
+        )
+
+        wafv2.CfnLoggingConfiguration(
+            self,
+            "AlbWafLogging",
+            resource_arn=web_acl.attr_arn,
+            log_destination_configs=[self.waf_log_group.log_group_arn],
+        )
+
         # Shared environment variables for all services
         shared_environment = {
             "SERVICE_NAMESPACE": "secure-api.local",
