@@ -124,6 +124,7 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 
 ## Documentation
 
+- [Hexagonal Architecture](hexagonal-architecture.md) - Ports & Adapters reference with system diagram
 - [Architecture (Containers)](architecture-containers.md) - ECS Fargate deployment with PostgreSQL
 - [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
 - [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between containers and serverless
@@ -232,4 +233,4 @@ uv run cdk deploy --all
 
 ## License
 
-MIT
+AGPL-3.0 — See [LICENSE](../LICENSE) for details.
