@@ -26,9 +26,26 @@ async def lifespan(app: FastAPI):
     """Application lifespan handler."""
     logger.info("Starting application", service=settings.service_name)
 
-    # Initialize database
+    # Initialize database and create tables
     db = get_database()
-    await db.create_tables()
+    try:
+        logger.info(
+            "Creating database tables",
+            db_host=settings.db_host,
+            db_name=settings.db_name,
+        )
+        await db.create_tables()
+        logger.info("Database tables created successfully")
+    except Exception as e:
+        logger.error(
+            "Failed to create database tables",
+            error=str(e),
+            error_type=type(e).__name__,
+            db_host=settings.db_host,
+            db_name=settings.db_name,
+            exc_info=True,
+        )
+        raise
 
     yield
 

@@ -8,6 +8,8 @@ Centralized logging setup with:
 - Security-aware logging (no PII)
 """
 
+import logging
+import sys
 import time
 from collections.abc import Callable
 from contextvars import ContextVar
@@ -28,6 +30,14 @@ def configure_logging(service_name: str) -> None:
     Args:
         service_name: Name of the service for log context
     """
+    # Configure Python's standard logging to output to stdout
+    # structlog.stdlib.LoggerFactory wraps stdlib logging, so we need handlers
+    logging.basicConfig(
+        format="%(message)s",
+        stream=sys.stdout,
+        level=logging.INFO,
+    )
+
     structlog.configure(
         processors=[
             structlog.contextvars.merge_contextvars,
