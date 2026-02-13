@@ -15,6 +15,9 @@ from aws_cdk import (
     aws_kms as kms,
 )
 from aws_cdk import (
+    aws_logs as logs,
+)
+from aws_cdk import (
     aws_rds as rds,
 )
 from aws_cdk import (
@@ -65,6 +68,29 @@ class DataStack(Stack):
         )
 
         # RDS PostgreSQL - Dev: Single-AZ, smaller instance
+        # Parameter group with pgaudit for DB-layer audit logging (Golden Thread)
+        self.db_parameter_group = rds.ParameterGroup(
+            self,
+            "DbParameterGroup",
+            engine=rds.DatabaseInstanceEngine.postgres(
+                version=rds.PostgresEngineVersion.VER_15,
+            ),
+            parameters={
+                # Enable pgaudit extension
+                "shared_preload_libraries": "pgaudit",
+                # Log all DML (read/write) statements
+                "pgaudit.log": "all",
+                # Log the full SQL statement (not just object name)
+                "pgaudit.log_statement_once": "on",
+                # Also log general statements for correlation
+                "log_statement": "mod",
+                # Log slow queries (>500ms)
+                "log_min_duration_statement": "500",
+                # Include PID for correlation
+                "log_line_prefix": "%t [%p]: [%l-1] user=%u,db=%d,app=%a ",
+            },
+        )
+
         self.database = rds.DatabaseInstance(
             self,
             "Database",
@@ -76,12 +102,16 @@ class DataStack(Stack):
             vpc_subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_ISOLATED),
             security_groups=[db_security_group],
             credentials=rds.Credentials.from_secret(self.db_secret),
+            parameter_group=self.db_parameter_group,
             multi_az=False,  # Dev: Single-AZ
             storage_encrypted=True,
             storage_encryption_key=kms_key,
             deletion_protection=False,  # Dev: Allow deletion
             backup_retention=Duration.days(1),  # Dev: Minimal backups
             removal_policy=RemovalPolicy.DESTROY,  # Dev: Clean up on delete
+            # Export PostgreSQL logs to CloudWatch for Golden Thread tracing
+            cloudwatch_logs_exports=["postgresql"],
+            cloudwatch_logs_retention=logs.RetentionDays.ONE_MONTH,
         )
 
         # S3 bucket with encryption - Dev: S3-managed encryption, auto-delete
