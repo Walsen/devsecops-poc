@@ -86,8 +86,6 @@ class DataStack(Stack):
                 "log_statement": "mod",
                 # Log slow queries (>500ms)
                 "log_min_duration_statement": "500",
-                # Include PID for correlation
-                "log_line_prefix": "%t [%p]: [%l-1] user=%u,db=%d,app=%a ",
             },
         )
 
