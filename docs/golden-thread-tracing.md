@@ -330,6 +330,359 @@ aws logs start-query \
   "
 ```
 
+## Exercise 6: Pentesting Tools (Kali Linux / Parrot OS)
+
+These exercises use professional penetration testing tools. Install them via
+your distro's package manager or use a Kali/Parrot live image.
+
+```bash
+# Kali / Parrot / Debian
+sudo apt install sqlmap nikto nmap hydra ffuf nuclei
+
+# macOS (via Homebrew)
+brew install sqlmap nikto nmap hydra ffuf nuclei
+```
+
+> **Important**: Only run these against your own infrastructure. Set the
+> target variables once and reuse them across exercises.
+
+```bash
+export TARGET="https://d2rv56b0ccriwq.cloudfront.net"
+export ALB_TARGET="http://Comput-Alb16-j1fq7hseoZQw-945843054.us-east-1.elb.amazonaws.com"
+export AWS_PROFILE="awscbba"
+```
+
+### 6.1 — nmap: Service Discovery & Port Scanning
+
+Discover what's exposed and verify only expected ports are open.
+
+```bash
+# Quick scan of the ALB (CloudFront won't respond to nmap)
+nmap -sV -T4 -Pn \
+  Comput-Alb16-j1fq7hseoZQw-945843054.us-east-1.elb.amazonaws.com
+
+# Check for TLS configuration
+nmap --script ssl-enum-ciphers -p 443 \
+  d2rv56b0ccriwq.cloudfront.net
+```
+
+Expected: Only port 80 open on ALB (CloudFront terminates TLS).
+TLS scan should show TLS 1.2+ only, no weak ciphers.
+
+**Trace it:**
+
+```bash
+# Check if nmap probes triggered WAF rules
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "aws-waf-logs-alb" \
+  --start-time $(date -d '10 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, action, terminatingRuleId, httpRequest.clientIp
+    | filter action = 'BLOCK'
+    | sort @timestamp desc | limit 20
+  "
+```
+
+### 6.2 — nikto: Web Server Vulnerability Scan
+
+Scan for common web server misconfigurations, default files, and known vulnerabilities.
+
+```bash
+nikto -h "$TARGET" \
+  -Tuning 1234567890abc \
+  -output nikto-report.html -Format html
+```
+
+Expected: nikto will probe hundreds of paths. Most will return 404 or get
+blocked by WAF. Review the report for any unexpected 200 responses.
+
+**Trace it:**
+
+```bash
+# See the flood of nikto probes in WAF logs
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "aws-waf-logs-cloudfront" \
+  --start-time $(date -d '30 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, action, httpRequest.uri, httpRequest.clientIp
+    | stats count() by action
+  "
+```
+
+You should see a large number of BLOCK actions from the
+`AWSManagedRulesKnownBadInputsRuleSet` and `AWSManagedRulesCommonRuleSet`.
+
+### 6.3 — sqlmap: Automated SQL Injection Testing
+
+sqlmap is the gold standard for SQL injection detection. It will try dozens
+of injection techniques against each parameter.
+
+```bash
+# Test the public certifications endpoint
+sqlmap -u "$TARGET/api/v1/certifications/types/?q=test" \
+  --batch \
+  --level=3 \
+  --risk=2 \
+  --random-agent \
+  --output-dir=./sqlmap-output
+
+# Test with a custom header for tracing
+sqlmap -u "$TARGET/api/v1/certifications/types/?q=test" \
+  --batch \
+  --level=3 \
+  --headers="X-Request-ID: sqlmap-test-$(date +%s)" \
+  --output-dir=./sqlmap-output
+```
+
+Expected: sqlmap should report "all tested parameters do not appear to be
+injectable" because:
+1. WAF blocks most SQLi payloads before they reach the app
+2. SQLAlchemy uses parameterized queries (immune to SQLi)
+
+**Trace it:**
+
+```bash
+# Count WAF blocks triggered by sqlmap
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "aws-waf-logs-cloudfront" "aws-waf-logs-alb" \
+  --start-time $(date -d '30 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, action, terminatingRuleId, httpRequest.uri
+    | filter action = 'BLOCK'
+    | filter terminatingRuleId like 'SQLi'
+    | stats count() by terminatingRuleId
+  "
+```
+
+### 6.4 — ffuf: Endpoint Fuzzing & Directory Discovery
+
+Fuzz for hidden endpoints, admin panels, and debug routes.
+
+```bash
+# Fuzz for common paths (use SecLists wordlist)
+# Install: apt install seclists
+ffuf -u "$TARGET/FUZZ" \
+  -w /usr/share/seclists/Discovery/Web-Content/common.txt \
+  -mc 200,301,302,401,403 \
+  -H "X-Request-ID: ffuf-fuzz-$(date +%s)" \
+  -rate 10 \
+  -o ffuf-results.json
+
+# Fuzz API versions
+ffuf -u "$TARGET/api/FUZZ/health" \
+  -w <(echo -e "v1\nv2\nv3\ninternal\nadmin\ndebug\ntest") \
+  -mc 200 \
+  -H "X-Request-ID: ffuf-api-$(date +%s)"
+```
+
+Expected: Only `/health`, `/docs`, `/api/v1/*` should return 200.
+No admin panels, debug endpoints, or hidden API versions.
+
+**Trace it:**
+
+```bash
+# See ffuf's probes in API logs (requests that passed WAF)
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "/ecs/secure-api/api" \
+  --start-time $(date -d '30 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, path, status_code, correlation_id
+    | filter correlation_id like 'ffuf-fuzz'
+    | stats count() by status_code
+  "
+```
+
+### 6.5 — nuclei: Template-Based Vulnerability Scanning
+
+nuclei uses community-maintained templates to test for thousands of known
+vulnerabilities, misconfigurations, and exposures.
+
+```bash
+# Update templates first
+nuclei -update-templates
+
+# Run with common web templates
+nuclei -u "$TARGET" \
+  -t http/cves/ \
+  -t http/misconfiguration/ \
+  -t http/exposures/ \
+  -t http/vulnerabilities/ \
+  -severity medium,high,critical \
+  -rate-limit 10 \
+  -header "X-Request-ID: nuclei-scan-$(date +%s)" \
+  -o nuclei-results.txt
+
+# Run specifically for security headers check
+nuclei -u "$TARGET" \
+  -t http/misconfiguration/http-missing-security-headers.yaml \
+  -o nuclei-headers.txt
+```
+
+Expected: Security headers should pass (we set X-Content-Type-Options,
+X-Frame-Options, HSTS, CSP, etc. via SecurityHeadersMiddleware).
+No critical CVEs should be found.
+
+**Trace it:**
+
+```bash
+# Check WAF blocks from nuclei's probes
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "aws-waf-logs-cloudfront" \
+  --start-time $(date -d '30 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, action, terminatingRuleId, httpRequest.uri
+    | filter action = 'BLOCK'
+    | stats count() by terminatingRuleId
+    | sort count() desc
+  "
+```
+
+### 6.6 — hydra: Authentication Brute Force
+
+Test rate limiting and account lockout against the Cognito-backed auth.
+
+```bash
+# Create a small password list
+cat > /tmp/passwords.txt << 'EOF'
+password
+123456
+admin
+letmein
+welcome
+monkey
+dragon
+master
+qwerty
+login
+EOF
+
+# Brute force the auth endpoint (will hit rate limiter fast)
+hydra -l test@example.com \
+  -P /tmp/passwords.txt \
+  -s 443 -S \
+  d2rv56b0ccriwq.cloudfront.net \
+  https-post-form \
+  "/api/v1/auth/login:username=^USER^&password=^PASS^:Invalid"
+```
+
+Expected: hydra will fail — requests get rate-limited (429) after a few
+attempts. WAF rate limiting (2000 req/IP) and app-level rate limiting
+(60 req/min per user) both kick in.
+
+**Trace it:**
+
+```bash
+# Check rate limit hits and failed auth attempts
+aws logs start-query --profile $AWS_PROFILE \
+  --log-group-names "/ecs/secure-api/api" \
+  --start-time $(date -d '10 minutes ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, event, client_ip, correlation_id
+    | filter event like 'Rate limit' or event like 'Authentication failed'
+    | sort @timestamp desc | limit 30
+  "
+
+# Check if the security alarm fired
+aws cloudwatch describe-alarms --profile $AWS_PROFILE \
+  --alarm-name-prefix "ObservabilityStack" \
+  --state-value ALARM \
+  --query 'MetricAlarms[].AlarmName' --output table
+```
+
+### 6.7 — Full Pentest Summary Script
+
+Run all tools in sequence and generate a combined report:
+
+```bash
+#!/usr/bin/env bash
+# golden-thread-pentest.sh — Run all exercises and collect traces
+set -euo pipefail
+
+TARGET="https://d2rv56b0ccriwq.cloudfront.net"
+PROFILE="awscbba"
+TIMESTAMP=$(date +%s)
+REPORT_DIR="./pentest-report-$TIMESTAMP"
+mkdir -p "$REPORT_DIR"
+
+echo "=== Golden Thread Pentest — $TIMESTAMP ==="
+
+echo "[1/5] nmap scan..."
+nmap -sV -T4 -Pn -oN "$REPORT_DIR/nmap.txt" \
+  Comput-Alb16-j1fq7hseoZQw-945843054.us-east-1.elb.amazonaws.com
+
+echo "[2/5] nikto scan..."
+nikto -h "$TARGET" -output "$REPORT_DIR/nikto.html" -Format html 2>/dev/null || true
+
+echo "[3/5] sqlmap test..."
+sqlmap -u "$TARGET/api/v1/certifications/types/?q=test" \
+  --batch --level=2 --output-dir="$REPORT_DIR/sqlmap" 2>/dev/null || true
+
+echo "[4/5] ffuf fuzz..."
+ffuf -u "$TARGET/FUZZ" \
+  -w /usr/share/seclists/Discovery/Web-Content/common.txt \
+  -mc 200,301,302,401,403 -rate 10 \
+  -o "$REPORT_DIR/ffuf.json" 2>/dev/null || true
+
+echo "[5/5] nuclei scan..."
+nuclei -u "$TARGET" \
+  -severity medium,high,critical -rate-limit 10 \
+  -o "$REPORT_DIR/nuclei.txt" 2>/dev/null || true
+
+echo ""
+echo "=== Collecting WAF traces ==="
+QUERY_ID=$(aws logs start-query --profile "$PROFILE" \
+  --log-group-names "aws-waf-logs-cloudfront" "aws-waf-logs-alb" \
+  --start-time $((TIMESTAMP - 3600)) --end-time $(date +%s) \
+  --query-string "
+    fields @timestamp, action, terminatingRuleId, httpRequest.uri, httpRequest.clientIp
+    | filter action = 'BLOCK'
+    | stats count() by terminatingRuleId
+    | sort count() desc
+  " --query 'queryId' --output text)
+
+sleep 5
+aws logs get-query-results --profile "$PROFILE" \
+  --query-id "$QUERY_ID" > "$REPORT_DIR/waf-blocks-summary.json"
+
+echo ""
+echo "=== Results saved to $REPORT_DIR ==="
+ls -la "$REPORT_DIR/"
+```
+
+## Interpreting Results
+
+After running the pentest tools, query CloudWatch for a consolidated view:
+
+```bash
+# Total WAF blocks by rule in the last hour
+aws logs start-query --profile awscbba \
+  --log-group-names "aws-waf-logs-cloudfront" "aws-waf-logs-alb" \
+  --start-time $(date -d '1 hour ago' +%s) \
+  --end-time $(date +%s) \
+  --query-string "
+    fields action, terminatingRuleId
+    | filter action = 'BLOCK'
+    | stats count() as blocked by terminatingRuleId
+    | sort blocked desc
+  "
+```
+
+Expected output after a full pentest run:
+
+| terminatingRuleId | blocked |
+|-------------------|---------|
+| AWSManagedRulesCommonRuleSet | ~200+ |
+| AWSManagedRulesSQLiRuleSet | ~50+ |
+| AWSManagedRulesKnownBadInputsRuleSet | ~30+ |
+| RateLimitRule | ~10+ |
+| BlockBadIps | 0 (unless GuardDuty auto-blocked your IP) |
+
 ## Useful CloudWatch Logs Insights Queries
 
 ### Trace a single request across all services
