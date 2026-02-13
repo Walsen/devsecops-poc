@@ -129,6 +129,7 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 - [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
 - [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between containers and serverless
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
+- [Golden Thread Tracing](golden-thread-tracing.md) - Distributed security tracing exercise (attack simulation)
 - [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
 - [AI Agents](ai-agents.md) - Using Bedrock Agents for intelligent posting
