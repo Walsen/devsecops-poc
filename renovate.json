@@ -1,0 +1,62 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:recommended",
+    "docker:enableMajor",
+    ":semanticCommits"
+  ],
+  "labels": ["dependencies"],
+  "prHourlyLimit": 5,
+  "prConcurrentLimit": 10,
+  "timezone": "America/La_Paz",
+  "schedule": ["before 9am on monday"],
+  "lockFileMaintenance": {
+    "enabled": true,
+    "schedule": ["before 9am on monday"]
+  },
+  "packageRules": [
+    {
+      "description": "Python services (api, worker, scheduler)",
+      "matchManagers": ["pep621", "uv"],
+      "matchFileNames": ["api/**", "worker/**", "scheduler/**"],
+      "additionalLabels": ["python"],
+      "groupName": "python-services"
+    },
+    {
+      "description": "Container infrastructure (CDK)",
+      "matchManagers": ["pep621", "uv"],
+      "matchFileNames": ["infra/**"],
+      "additionalLabels": ["python", "infrastructure"],
+      "groupName": "infra-cdk"
+    },
+    {
+      "description": "Serverless infrastructure (CDK)",
+      "matchManagers": ["pep621", "uv"],
+      "matchFileNames": ["infra-fs/**"],
+      "additionalLabels": ["python", "infrastructure"],
+      "groupName": "infra-fs-cdk"
+    },
+    {
+      "description": "Frontend (npm)",
+      "matchManagers": ["npm"],
+      "additionalLabels": ["javascript", "frontend"]
+    },
+    {
+      "description": "GitHub Actions",
+      "matchManagers": ["github-actions"],
+      "additionalLabels": ["ci"],
+      "groupName": "github-actions"
+    },
+    {
+      "description": "Docker base images",
+      "matchManagers": ["dockerfile"],
+      "additionalLabels": ["docker"],
+      "groupName": "docker-images"
+    },
+    {
+      "description": "Pin major version updates for review",
+      "matchUpdateTypes": ["major"],
+      "dependencyDashboardApproval": true
+    }
+  ]
+}
