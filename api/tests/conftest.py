@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -29,7 +29,7 @@ def sample_message(sample_content, sample_channels) -> Message:
     return Message.create(
         content=sample_content,
         channels=sample_channels,
-        scheduled_at=datetime.utcnow() + timedelta(hours=1),
+        scheduled_at=datetime.now(UTC) + timedelta(hours=1),
         recipient_id="user-123",
     )
 

@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import UUID
 
@@ -39,14 +39,12 @@ class TestScheduleMessageService:
         return CreateMessageDTO(
             content="Test message",
             channels=["whatsapp", "email"],
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-123",
         )
 
     @pytest.mark.asyncio
-    async def test_execute_creates_and_saves_message(
-        self, service, valid_dto, mock_repository
-    ):
+    async def test_execute_creates_and_saves_message(self, service, valid_dto, mock_repository):
         result = await service.execute(valid_dto)
 
         assert isinstance(result, UUID)
@@ -57,17 +55,13 @@ class TestScheduleMessageService:
         assert saved_message.status == MessageStatus.SCHEDULED
 
     @pytest.mark.asyncio
-    async def test_execute_commits_transaction(
-        self, service, valid_dto, mock_unit_of_work
-    ):
+    async def test_execute_commits_transaction(self, service, valid_dto, mock_unit_of_work):
         await service.execute(valid_dto)
 
         mock_unit_of_work.commit.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_execute_publishes_event(
-        self, service, valid_dto, mock_event_publisher
-    ):
+    async def test_execute_publishes_event(self, service, valid_dto, mock_event_publisher):
         result = await service.execute(valid_dto)
 
         mock_event_publisher.publish.assert_called_once()
@@ -78,14 +72,12 @@ class TestScheduleMessageService:
         assert call_args[1]["payload"]["channels"] == ["whatsapp", "email"]
 
     @pytest.mark.asyncio
-    async def test_execute_with_media_url(
-        self, service, mock_repository
-    ):
+    async def test_execute_with_media_url(self, service, mock_repository):
         dto = CreateMessageDTO(
             content="Message with media",
             media_url="https://example.com/image.jpg",
             channels=["instagram"],
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-456",
         )
 
@@ -99,7 +91,7 @@ class TestScheduleMessageService:
         dto = CreateMessageDTO(
             content="Test",
             channels=["invalid_channel"],
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-123",
         )
 
@@ -112,6 +104,6 @@ class TestScheduleMessageService:
             CreateMessageDTO(
                 content="",
                 channels=["whatsapp"],
-                scheduled_at=datetime.utcnow() + timedelta(hours=1),
+                scheduled_at=datetime.now(UTC) + timedelta(hours=1),
                 recipient_id="user-123",
             )

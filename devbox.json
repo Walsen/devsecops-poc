@@ -8,7 +8,8 @@
     "awscli2@latest",
     "nodejs@latest",
     "gh@latest",
-    "just@latest"
+    "just@latest",
+    "docker@latest"
   ],
   "shell": {
     "init_hook": [

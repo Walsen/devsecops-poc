@@ -1,0 +1,32 @@
+services:
+  # Test runner service
+  test-runner:
+    build:
+      context: ./api
+      dockerfile: Dockerfile.dev
+    environment:
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: omnichannel_test
+      DB_USER: dbadmin
+      DB_PASSWORD: localdev123
+      AWS_REGION: us-east-1
+      AWS_ACCESS_KEY_ID: test
+      AWS_SECRET_ACCESS_KEY: test
+      AWS_ENDPOINT_URL: http://localstack:4566
+    volumes:
+      - ./api/src:/app/src:ro
+      - ./api/tests:/app/tests:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      localstack:
+        condition: service_healthy
+    command: pytest tests/ -v --tb=short
+    profiles:
+      - test
+
+  # Test database (separate from dev)
+  postgres:
+    environment:
+      POSTGRES_DB: omnichannel_test

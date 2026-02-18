@@ -128,9 +128,11 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 - [Architecture (Containers)](architecture-containers.md) - ECS Fargate deployment with PostgreSQL
 - [Architecture (Serverless)](architecture-serverless.md) - Lambda + DynamoDB deployment
 - [Dual-Mode Deployment](dual-mode-deployment.md) - Switching between containers and serverless
+- [Testing](testing.md) - Docker-based testing, security testing, and CI/CD integration
 - [Security](security.md) - Zero Trust and Secure Supply Chain practices
 - [Golden Thread Tracing](golden-thread-tracing.md) - Distributed security tracing exercise (attack simulation)
 - [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
+- [Automated Penetration Testing](automated-penetration-testing.md) - Automated security testing with Docker
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
 - [AI Agents](ai-agents.md) - Using Bedrock Agents for intelligent posting
 
@@ -154,13 +156,19 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 just up
 
 # Run database migrations
-just migrate
-
-# Start API in development mode
-just dev-api
+just db-migrate
 
 # Run tests
 just test
+
+# Run isolated tests (recommended for CI)
+just test-isolated
+
+# Run security tests
+just security-scan
+
+# Full security suite
+just pentest-full http://localhost:8080
 ```
 
 ### Deployment

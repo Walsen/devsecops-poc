@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -23,16 +23,14 @@ class TestGetMessageService:
         message = Message.create(
             content=MessageContent(text="Test message"),
             channels=[ChannelType.WHATSAPP, ChannelType.EMAIL],
-            scheduled_at=datetime.utcnow() + timedelta(hours=1),
+            scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-123",
         )
         message.schedule()
         return message
 
     @pytest.mark.asyncio
-    async def test_execute_returns_message_dto(
-        self, service, mock_repository, sample_message
-    ):
+    async def test_execute_returns_message_dto(self, service, mock_repository, sample_message):
         mock_repository.get_by_id.return_value = sample_message
 
         result = await service.execute(sample_message.id)
@@ -45,9 +43,7 @@ class TestGetMessageService:
         assert len(result.deliveries) == 2
 
     @pytest.mark.asyncio
-    async def test_execute_returns_none_for_nonexistent_message(
-        self, service, mock_repository
-    ):
+    async def test_execute_returns_none_for_nonexistent_message(self, service, mock_repository):
         mock_repository.get_by_id.return_value = None
 
         result = await service.execute(uuid4())
@@ -55,9 +51,7 @@ class TestGetMessageService:
         assert result is None
 
     @pytest.mark.asyncio
-    async def test_execute_maps_channels_correctly(
-        self, service, mock_repository, sample_message
-    ):
+    async def test_execute_maps_channels_correctly(self, service, mock_repository, sample_message):
         mock_repository.get_by_id.return_value = sample_message
 
         result = await service.execute(sample_message.id)
@@ -76,28 +70,22 @@ class TestGetMessageService:
 
         result = await service.execute(sample_message.id)
 
-        whatsapp_delivery = next(
-            d for d in result.deliveries if d.channel == "whatsapp"
-        )
-        email_delivery = next(
-            d for d in result.deliveries if d.channel == "email"
-        )
+        whatsapp_delivery = next(d for d in result.deliveries if d.channel == "whatsapp")
+        email_delivery = next(d for d in result.deliveries if d.channel == "email")
 
         assert whatsapp_delivery.status == "delivered"
         assert whatsapp_delivery.delivered_at is not None
         assert email_delivery.status == "scheduled"
 
     @pytest.mark.asyncio
-    async def test_execute_includes_media_url(
-        self, service, mock_repository
-    ):
+    async def test_execute_includes_media_url(self, service, mock_repository):
         message = Message.create(
             content=MessageContent(
                 text="With media",
                 media_url="https://example.com/image.jpg",
             ),
             channels=[ChannelType.INSTAGRAM],
-            scheduled_at=datetime.utcnow(),
+            scheduled_at=datetime.now(UTC),
             recipient_id="user-456",
         )
         mock_repository.get_by_id.return_value = message

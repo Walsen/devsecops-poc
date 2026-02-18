@@ -1,0 +1,19 @@
+FROM kalilinux/kali-rolling
+
+RUN apt-get update && apt-get install -y \
+    curl \
+    jq \
+    nmap \
+    nikto \
+    sqlmap \
+    wget \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install just
+RUN wget -qO- https://just.systems/install.sh | bash -s -- --to /usr/local/bin
+
+WORKDIR /tests
+COPY justfile /tests/
+
+# Keep container running
+CMD ["tail", "-f", "/dev/null"]

@@ -1,0 +1,145 @@
+# Penetration Testing Justfile
+# Usage: just <recipe> [TARGET_URL]
+
+# Get ALB URL from CloudFormation or fallback to localhost
+alb_url := `aws cloudformation describe-stacks --stack-name ComputeStack --query "Stacks[0].Outputs[?OutputKey=='AlbDnsName'].OutputValue" --output text 2>/dev/null || echo "localhost"`
+
+# Default target URL (override with TARGET_URL env var)
+target := env_var_or_default('TARGET_URL', 'http://' + alb_url)
+
+# Kali container name
+kali_container := "kali-pentest"
+
+# Start Kali container
+start:
+    docker run -d --name {{kali_container}} --network host kali-pentest
+
+# Stop and remove Kali container
+stop:
+    docker stop {{kali_container}} && docker rm {{kali_container}}
+
+# Install dependencies
+install:
+    uv sync
+
+# Run interactive pentest agent
+agent:
+    uv run python pentest_agent.py
+
+# Run all pytest tests
+test:
+    uv run pytest -v --tb=short
+
+# Run tests in parallel
+test-parallel:
+    uv run pytest -v -n auto
+
+# Run only fast tests (skip slow scans)
+test-fast:
+    uv run pytest -v -m "not slow"
+
+# Run with detailed output
+test-verbose:
+    uv run pytest -vv -s
+
+# Generate HTML report
+test-report:
+    uv run pytest -v --html=pentest-report.html --self-contained-html
+
+# Individual test tasks
+test-health:
+    uv run pytest -v test_pentest.py::TestBasicSecurity::test_health_check
+
+test-headers:
+    uv run pytest -v test_pentest.py::TestBasicSecurity::test_security_headers
+
+test-sql-injection:
+    uv run pytest -v test_pentest.py::TestWAFProtection::test_sql_injection_blocked
+
+test-xss:
+    uv run pytest -v test_pentest.py::TestWAFProtection::test_xss_sanitization
+
+test-rate-limit:
+    uv run pytest -v test_pentest.py::TestRateLimiting::test_rate_limit_enforcement
+
+test-nmap HOST="":
+    uv run pytest -v test_pentest.py::TestAdvancedScanning::test_nmap_port_scan {{if HOST != "" { "--override-ini='target_url=" + HOST + "'" } else { "" } }}
+
+test-nikto:
+    uv run pytest -v test_pentest.py::TestAdvancedScanning::test_nikto_web_scan
+
+test-sqlmap:
+    uv run pytest -v test_pentest.py::TestAdvancedScanning::test_sqlmap_injection_scan
+
+test-idor:
+    uv run pytest -v test_pentest.py::TestIDORProtection
+
+# Execute command in Kali container
+[private]
+kali-exec +ARGS:
+    docker exec {{kali_container}} {{ARGS}}
+
+# Run all tests
+all: health headers waf-sql waf-xss rate-limit
+
+# Basic health check
+health:
+    echo "=== Health Check ==="
+    just kali-exec curl -v {{target}}/health
+
+# Check security headers
+headers:
+    echo "=== Security Headers ==="
+    just kali-exec curl -I {{target}}/health 2>/dev/null | grep -iE "(content-security-policy|strict-transport-security|x-content-type-options|x-frame-options)" || echo "Some security headers may be missing"
+
+# Test WAF SQL injection protection
+waf-sql:
+    echo "=== WAF SQL Injection Test ==="
+    just kali-exec curl -v "{{target}}/api/v1/messages?id=1'%20OR%20'1'='1" 2>&1 | grep -E "(HTTP|403|blocked)" || echo "FAIL: SQL injection not blocked"
+
+# Test WAF XSS protection
+waf-xss:
+    echo "=== XSS Test ==="
+    just kali-exec curl -X POST {{target}}/api/v1/messages -H "Content-Type: application/json" -d '{"content": "<script>alert(1)</script>"}' | grep -v "<script>" && echo "PASS: XSS escaped" || echo "FAIL: XSS not escaped"
+
+# Test rate limiting
+rate-limit:
+    echo "=== Rate Limit Test (sending 70 requests) ==="
+    docker exec {{kali_container}} bash -c 'for i in {1..70}; do curl -s -o /dev/null -w "%{http_code}\n" {{target}}/health; done | sort | uniq -c'
+
+# Test IDOR protection (requires auth token)
+idor TOKEN:
+    echo "=== IDOR Test ==="
+    echo "Creating message with token..."
+    docker exec {{kali_container}} bash -c 'MESSAGE_ID=$(curl -s -X POST {{target}}/api/v1/messages -H "Authorization: Bearer {{TOKEN}}" -H "Content-Type: application/json" -d "{\"content\": \"test\"}" | jq -r ".id") && echo "Trying to access with different token..." && curl -v {{target}}/api/v1/messages/$MESSAGE_ID -H "Authorization: Bearer invalid-token" 2>&1 | grep -E "(403|401)" && echo "PASS: IDOR protected" || echo "FAIL: IDOR vulnerable"'
+
+# Run nmap port scan
+nmap-scan HOST:
+    echo "=== Nmap Port Scan ==="
+    just kali-exec nmap -sV -p 80,443 {{HOST}}
+
+# Run nikto web scanner
+nikto-scan:
+    echo "=== Nikto Web Scanner ==="
+    just kali-exec nikto -h {{target}}
+
+# Run sqlmap automated SQL injection test
+sqlmap-scan:
+    echo "=== SQLMap Automated Test ==="
+    just kali-exec sqlmap -u "{{target}}/api/v1/messages?id=1" --batch --level=1 --risk=1
+
+# Full automated scan (all tools)
+full-scan: all nikto-scan
+
+# Quick smoke test
+smoke: health headers
+
+# Generate test report
+report:
+    echo "=== Penetration Test Report ==="
+    echo "Target: {{target}}"
+    echo "Date: $(date)"
+    echo ""
+    just all 2>&1 | tee pentest-report.txt
+    echo ""
+    echo "Report saved to: pentest-report.txt"

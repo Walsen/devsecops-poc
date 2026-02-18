@@ -1,4 +1,4 @@
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -8,7 +8,7 @@ from src.domain.value_objects import ChannelType
 
 class TestMessageCreation:
     def test_create_message_with_valid_data(self, sample_content, sample_channels):
-        scheduled_at = datetime.utcnow() + timedelta(hours=1)
+        scheduled_at = datetime.now(UTC) + timedelta(hours=1)
 
         message = Message.create(
             content=sample_content,
@@ -29,7 +29,7 @@ class TestMessageCreation:
         message = Message.create(
             content=sample_content,
             channels=sample_channels,
-            scheduled_at=datetime.utcnow(),
+            scheduled_at=datetime.now(UTC),
             recipient_id="user-123",
         )
 

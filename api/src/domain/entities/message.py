@@ -1,5 +1,5 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from uuid import UUID, uuid4
 
@@ -48,7 +48,7 @@ class Message:
         recipient_id: str,
     ) -> "Message":
         """Factory method to create a new message."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
         message = cls(
             id=uuid4(),
             content=content,
@@ -68,19 +68,19 @@ class Message:
         if self.status != MessageStatus.DRAFT:
             raise ValueError(f"Cannot schedule message in {self.status} status")
         self.status = MessageStatus.SCHEDULED
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def mark_processing(self) -> None:
         """Mark message as being processed."""
         self.status = MessageStatus.PROCESSING
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
 
     def mark_channel_delivered(self, channel: ChannelType) -> None:
         """Mark a specific channel as delivered."""
         for delivery in self.deliveries:
             if delivery.channel == channel:
                 delivery.status = MessageStatus.DELIVERED
-                delivery.delivered_at = datetime.utcnow()
+                delivery.delivered_at = datetime.now(UTC)
                 break
         self._update_overall_status()
 
@@ -104,4 +104,4 @@ class Message:
         elif any(s == MessageStatus.DELIVERED for s in statuses):
             self.status = MessageStatus.PARTIALLY_DELIVERED
 
-        self.updated_at = datetime.utcnow()
+        self.updated_at = datetime.now(UTC)
