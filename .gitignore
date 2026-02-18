@@ -39,3 +39,18 @@ Thumbs.db
 
 # direnv
 .direnv/
+
+# vagrant
+.vagrant
+
+# Security scan artifacts
+sbom-reports/
+nuclei-results.txt
+pentest-report.txt
+prowler-results/
+
+# Ruff / mypy / pytest caches
+.ruff_cache/
+.mypy_cache/
+.pytest_cache/
+

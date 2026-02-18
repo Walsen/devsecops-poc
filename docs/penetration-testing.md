@@ -1,6 +1,6 @@
 # Penetration Testing Guide
 
-This document provides a comprehensive checklist for manual penetration testing of the Omnichannel Publisher platform, covering all security features implemented in Phases 1-4.
+This document provides a comprehensive guide for penetration testing of the Omnichannel Publisher platform, covering both automated and manual testing approaches.
 
 ## Overview
 
@@ -13,19 +13,105 @@ flowchart TB
         INFRA["Infrastructure<br/>Headers, TLS, WAF"]
     end
 
-    subgraph Tools["Recommended Tools"]
+    subgraph Automated["Automated Testing"]
+        DOCKER["Docker Container<br/>Kali Linux"]
+        JUST["Justfile Recipes<br/>Test Automation"]
+        CI["CI/CD Integration<br/>GitHub Actions"]
+    end
+
+    subgraph Manual["Manual Tools"]
         BURP["Burp Suite Community"]
         ZAP["OWASP ZAP"]
         CURL["cURL / httpie"]
         JWT_TOOL["jwt_tool"]
     end
 
-    Scope --> Tools
+    Scope --> Automated
+    Scope --> Manual
+```
+
+## Quick Start: Automated Testing
+
+The fastest way to run penetration tests is using our Dockerized Kali Linux environment with justfile recipes.
+
+### Build the Test Container
+
+```bash
+cd testing/
+docker build -f Dockerfile.kali -t pentest:latest .
+```
+
+### Run Tests
+
+```bash
+# Set your target URL
+export TARGET_URL=http://your-alb.amazonaws.com
+
+# Run all basic tests
+docker run --rm -e TARGET_URL=$TARGET_URL pentest all
+
+# Run specific test
+docker run --rm -e TARGET_URL=$TARGET_URL pentest waf-sql
+
+# Quick smoke test
+docker run --rm -e TARGET_URL=$TARGET_URL pentest smoke
+
+# Full scan with nmap + nikto
+docker run --rm -e TARGET_URL=$TARGET_URL pentest full-scan
+
+# Generate report
+docker run --rm -v $(pwd):/tests -e TARGET_URL=$TARGET_URL pentest report
+```
+
+### Available Test Recipes
+
+| Recipe | Description | Duration |
+|--------|-------------|----------|
+| `all` | Run all basic security tests | ~2 min |
+| `smoke` | Quick health + headers check | ~10 sec |
+| `health` | Basic connectivity test | ~5 sec |
+| `headers` | Security headers verification | ~5 sec |
+| `waf-sql` | SQL injection WAF test | ~10 sec |
+| `waf-xss` | XSS protection test | ~10 sec |
+| `rate-limit` | Rate limiting test (70 requests) | ~30 sec |
+| `idor TOKEN` | IDOR protection test (requires auth) | ~15 sec |
+| `nmap HOST` | Port scan | ~1 min |
+| `nikto` | Web vulnerability scan | ~5 min |
+| `sqlmap` | Automated SQL injection test | ~10 min |
+| `full-scan` | Complete automated scan | ~15 min |
+| `report` | Generate test report file | ~2 min |
+
+### Example Workflow
+
+```bash
+# 1. Build container (one time)
+docker build -f testing/Dockerfile.kali -t pentest:latest testing/
+
+# 2. Get your ALB endpoint
+export TARGET_URL=$(aws cloudformation describe-stacks \
+  --stack-name ComputeStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`AlbDnsName`].OutputValue' \
+  --output text)
+
+# 3. Run smoke test
+docker run --rm -e TARGET_URL=http://$TARGET_URL pentest smoke
+
+# 4. Run full test suite
+docker run --rm -e TARGET_URL=http://$TARGET_URL pentest all
+
+# 5. Generate report
+docker run --rm -v $(pwd):/tests -e TARGET_URL=http://$TARGET_URL pentest report
+cat pentest-report.txt
 ```
 
 ## Pre-requisites
 
-### Environment Setup
+### For Automated Testing
+- Docker installed
+- AWS credentials configured (to get ALB endpoint)
+- Network access to target environment
+
+### For Manual Testing
 ```bash
 # Install testing tools
 pip install httpie jwt-tool
@@ -42,7 +128,182 @@ pip install httpie jwt-tool
 
 ---
 
-## 1. JWT Authentication Testing
+## Automated Testing Deep Dive
+
+### Architecture
+
+The automated testing framework consists of:
+
+1. **Kali Linux Container** (`testing/Dockerfile.kali`)
+   - Pre-installed security tools (curl, nmap, nikto, sqlmap)
+   - Just command runner for test orchestration
+   - Lightweight and reproducible
+
+2. **Justfile Test Recipes** (`testing/justfile`)
+   - Declarative test definitions
+   - Easy to extend and maintain
+   - Consistent execution across environments
+
+3. **CI/CD Integration** (optional)
+   - GitHub Actions workflow
+   - Scheduled or on-demand execution
+   - Automated reporting
+
+### Container Details
+
+**Base Image**: `kalilinux/kali-rolling`
+
+**Installed Tools**:
+- `curl` - HTTP client for API testing
+- `jq` - JSON processor for response parsing
+- `nmap` - Network port scanner
+- `nikto` - Web server scanner
+- `sqlmap` - Automated SQL injection tool
+- `just` - Command runner
+
+**Size**: ~500MB (compressed)
+
+### Justfile Recipe Structure
+
+Each recipe follows this pattern:
+
+```just
+recipe-name PARAM:
+    @echo "=== Test Description ==="
+    command {{PARAM}}
+    validation-logic
+```
+
+**Key Features**:
+- Environment variable support (`TARGET_URL`)
+- Parameter passing for dynamic values
+- Output formatting for readability
+- Pass/fail validation logic
+
+### Adding Custom Tests
+
+Edit `testing/justfile` to add new recipes:
+
+```just
+# Test custom endpoint
+custom-test:
+    @echo "=== Custom Test ==="
+    curl -v {{target}}/custom/endpoint
+    # Add validation logic
+```
+
+Then run:
+```bash
+docker run --rm -e TARGET_URL=$TARGET_URL pentest custom-test
+```
+
+### CI/CD Integration
+
+Create `.github/workflows/pentest.yml`:
+
+```yaml
+name: Penetration Test
+on:
+  workflow_dispatch:
+    inputs:
+      target_url:
+        description: 'Target URL to test'
+        required: true
+  schedule:
+    - cron: '0 2 * * 1'  # Weekly Monday 2am
+
+jobs:
+  pentest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build pentest container
+        run: docker build -f testing/Dockerfile.kali -t pentest testing/
+      
+      - name: Run smoke test
+        run: |
+          docker run --rm -e TARGET_URL=${{ inputs.target_url || secrets.DEV_API_URL }} \
+            pentest smoke
+      
+      - name: Run full test suite
+        run: |
+          docker run --rm -e TARGET_URL=${{ inputs.target_url || secrets.DEV_API_URL }} \
+            pentest all
+      
+      - name: Generate report
+        run: |
+          docker run --rm -v $(pwd):/tests \
+            -e TARGET_URL=${{ inputs.target_url || secrets.DEV_API_URL }} \
+            pentest report
+      
+      - name: Upload report
+        uses: actions/upload-artifact@v4
+        with:
+          name: pentest-report
+          path: pentest-report.txt
+```
+
+**Trigger manually**:
+```bash
+gh workflow run pentest.yml -f target_url=http://your-alb.amazonaws.com
+```
+
+### Local Development Workflow
+
+```bash
+# 1. Start local environment
+docker-compose up -d
+
+# 2. Wait for services to be ready
+sleep 10
+
+# 3. Run tests against local
+docker run --rm --network host -e TARGET_URL=http://localhost:8080 pentest all
+
+# 4. Review results
+docker run --rm --network host -v $(pwd):/tests \
+  -e TARGET_URL=http://localhost:8080 pentest report
+cat pentest-report.txt
+```
+
+### Troubleshooting
+
+**Container won't build**:
+```bash
+# Clear Docker cache
+docker builder prune -a
+
+# Rebuild without cache
+docker build --no-cache -f testing/Dockerfile.kali -t pentest testing/
+```
+
+**Network connectivity issues**:
+```bash
+# Test from host first
+curl http://your-alb.amazonaws.com/health
+
+# Use host network mode
+docker run --rm --network host -e TARGET_URL=http://localhost pentest health
+```
+
+**Permission denied on report generation**:
+```bash
+# Ensure write permissions
+chmod 777 $(pwd)
+
+# Or run with user mapping
+docker run --rm -u $(id -u):$(id -g) -v $(pwd):/tests \
+  -e TARGET_URL=$TARGET_URL pentest report
+```
+
+---
+
+## Manual Testing Guide
+
+The following sections provide detailed manual testing procedures for each security control.
+
+### 1. JWT Authentication Testing
 
 ### 1.1 Algorithm Confusion Attack
 **Risk**: Critical | **Status**: ✅ Mitigated
@@ -71,7 +332,6 @@ curl -X GET https://api.example.com/api/v1/messages \
 ```
 
 ### 1.2 Missing/Invalid Audience Claim
-**Risk**: Critical | **Status**: ✅ Mitigated
 
 ```bash
 # Create token with wrong audience

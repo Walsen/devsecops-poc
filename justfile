@@ -40,6 +40,22 @@ logs:
 build:
     docker compose build --no-cache
 
+# Build Kali testing container
+build-kali:
+    docker build -t devsecops-kali -f testing/Dockerfile.kali testing/
+
+# Run interactive pentest agent
+agent:
+    uv run --directory testing python pentest_agent.py
+
+# Run pentest suite (fast tests only)
+pentest:
+    just --justfile testing/justfile test-fast
+
+# Run pentest suite (all tests in parallel)
+pentest-parallel:
+    just --justfile testing/justfile test-parallel
+
 # Stop services and remove volumes
 clean:
     docker compose down -v
@@ -80,7 +96,11 @@ scheduler-shell:
     docker compose exec scheduler bash
 
 # Testing
-# Run all tests
+# Run all tests in isolated containers
+test-isolated:
+    docker compose -f docker-compose.yml -f docker-compose.test.yml --profile test up --build --abort-on-container-exit test-runner
+
+# Run all tests (existing containers)
 test:
     docker compose exec api pytest -v
 
@@ -88,9 +108,13 @@ test:
 test-api:
     docker compose exec api pytest -v tests/
 
-# Run Worker tests
+# Run Worker tests  
 test-worker:
     docker compose exec worker pytest -v tests/
+
+# Run Scheduler tests
+test-scheduler:
+    docker compose exec scheduler pytest -v tests/
 
 # Run tests with coverage
 test-cov:
@@ -103,6 +127,11 @@ test-file file:
 # Run tests matching pattern
 test-match pattern:
     docker compose exec api pytest -v -k "{{pattern}}"
+
+# Build and run tests for single service
+test-build service:
+    docker build -t {{service}}-test ./{{service}} -f ./{{service}}/Dockerfile.dev
+    docker run --rm -v ./{{service}}/tests:/app/tests {{service}}-test pytest tests/ -v
 
 # Linting
 # Run linters

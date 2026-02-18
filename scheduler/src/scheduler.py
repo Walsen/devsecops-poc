@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import UTC, datetime
 
 import structlog
 from sqlalchemy import text
@@ -19,7 +19,7 @@ class MessageScheduler:
 
     async def process_due_messages(self) -> int:
         """Find and dispatch all messages that are due for delivery."""
-        now = datetime.utcnow()
+        now = datetime.now(UTC)
 
         logger.info("Checking for due messages", timestamp=now.isoformat())
 
