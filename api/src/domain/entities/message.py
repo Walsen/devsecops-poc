@@ -35,6 +35,7 @@ class Message:
     scheduled_at: datetime
     status: MessageStatus
     recipient_id: str
+    user_id: str
     created_at: datetime
     updated_at: datetime
     deliveries: list[ChannelDelivery] = field(default_factory=list)
@@ -46,6 +47,7 @@ class Message:
         channels: list[ChannelType],
         scheduled_at: datetime,
         recipient_id: str,
+        user_id: str,
     ) -> "Message":
         """Factory method to create a new message."""
         now = datetime.now(UTC)
@@ -56,6 +58,7 @@ class Message:
             scheduled_at=scheduled_at,
             status=MessageStatus.DRAFT,
             recipient_id=recipient_id,
+            user_id=user_id,
             created_at=now,
             updated_at=now,
         )

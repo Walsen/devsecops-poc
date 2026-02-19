@@ -1,4 +1,5 @@
-from datetime import datetime
+from datetime import UTC, datetime
+from typing import overload
 from uuid import UUID
 
 from sqlalchemy import DateTime, ForeignKey, String, Text
@@ -10,15 +11,31 @@ from ...domain.value_objects import ChannelType, MessageContent
 
 
 def _naive_utc(dt: datetime | None) -> datetime | None:
-    """Strip timezone info for storage in TIMESTAMP WITHOUT TIME ZONE columns.
-
-    The domain layer correctly uses tz-aware UTC datetimes. The DB columns
-    are currently naive (TIMESTAMP). This adapter helper bridges the gap
-    until migration 003 converts columns to TIMESTAMPTZ.
-    """
+    """Strip timezone info for storage in TIMESTAMP WITHOUT TIME ZONE columns."""
     if dt is None:
         return None
     return dt.replace(tzinfo=None)
+
+
+@overload
+def _aware_utc(dt: datetime) -> datetime: ...
+
+
+@overload
+def _aware_utc(dt: None) -> None: ...
+
+
+@overload
+def _aware_utc(dt: datetime | None) -> datetime | None: ...
+
+
+def _aware_utc(dt: datetime | None) -> datetime | None:
+    """Attach UTC timezone to naive datetimes read from the database."""
+    if dt is None:
+        return None
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=UTC)
+    return dt
 
 
 class Base(DeclarativeBase):
@@ -31,6 +48,7 @@ class MessageModel(Base):
     __tablename__ = "messages"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     content_text: Mapped[str] = mapped_column(Text, nullable=False)
     content_media_url: Mapped[str | None] = mapped_column(String(2048))
     scheduled_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
@@ -48,6 +66,7 @@ class MessageModel(Base):
         """Convert domain entity to ORM model."""
         model = cls(
             id=message.id,
+            user_id=message.user_id,
             content_text=message.content.text,
             content_media_url=message.content.media_url,
             scheduled_at=_naive_utc(message.scheduled_at),
@@ -68,11 +87,12 @@ class MessageModel(Base):
             id=self.id,
             content=MessageContent(text=self.content_text, media_url=self.content_media_url),
             channels=channels,
-            scheduled_at=self.scheduled_at,
+            scheduled_at=_aware_utc(self.scheduled_at),
             status=MessageStatus(self.status),
             recipient_id=self.recipient_id,
-            created_at=self.created_at,
-            updated_at=self.updated_at,
+            user_id=self.user_id,
+            created_at=_aware_utc(self.created_at),
+            updated_at=_aware_utc(self.updated_at),
             deliveries=[d.to_entity() for d in self.deliveries],
         )
         return message
@@ -108,7 +128,7 @@ class ChannelDeliveryModel(Base):
         return ChannelDelivery(
             channel=ChannelType(self.channel),
             status=MessageStatus(self.status),
-            delivered_at=self.delivered_at,
+            delivered_at=_aware_utc(self.delivered_at),
             error=self.error,
         )
 
