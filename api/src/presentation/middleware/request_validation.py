@@ -150,6 +150,10 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         response.headers["Cross-Origin-Opener-Policy"] = "same-origin"
         response.headers["Cross-Origin-Resource-Policy"] = "same-origin"
 
+        # Security: Remove Server header to prevent technology fingerprinting
+        if "server" in response.headers:
+            del response.headers["server"]
+
         return response
 
     def _is_docs_path(self, path: str) -> bool:
