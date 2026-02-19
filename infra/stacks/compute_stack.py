@@ -278,6 +278,45 @@ class ComputeStack(Stack):
         )
 
         # ============================================================
+        # Migration Task Definition (one-off task for Alembic migrations)
+        # ============================================================
+        migration_task_def = ecs.FargateTaskDefinition(
+            self,
+            "MigrationTaskDef",
+            family="api-migration",
+            memory_limit_mib=512,
+            cpu=256,
+        )
+        db_secret.grant_read(migration_task_def.task_role)
+        kms_key.grant_decrypt(migration_task_def.task_role)
+
+        migration_task_def.add_container(
+            "migration",
+            image=ecs.ContainerImage.from_ecr_repository(
+                ecr_repositories["api"],
+                tag=image_tag,
+            ),
+            logging=ecs.LogDrivers.aws_logs(
+                stream_prefix="migration",
+                log_group=self.api_log_group,
+            ),
+            environment={
+                **shared_environment,
+                "SERVICE_NAME": "migration",
+            },
+            secrets=shared_secrets,
+            command=["python", "-m", "alembic", "upgrade", "head"],
+        )
+
+        # Export security group ID for migration workflow
+        CfnOutput(
+            self,
+            "ServiceSecurityGroupId",
+            value=self.service_security_group.security_group_id,
+            export_name="ComputeStack-ServiceSecurityGroupId",
+        )
+
+        # ============================================================
         # ALB Listener - Only API service is exposed externally
         # Dev: Using HTTP for simplicity. For production, use HTTPS with ACM certificate.
         # ============================================================

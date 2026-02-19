@@ -27,6 +27,7 @@ class PostgresCertificationRepository(CertificationRepository):
     async def save(self, submission: CertificationSubmission) -> None:
         model = CertificationSubmissionModel(
             id=submission.id,
+            user_id=submission.user_id,
             member_name=submission.member_name,
             certification_type=submission.certification_type.value,
             certification_date=_naive_utc(submission.certification_date),
@@ -80,6 +81,7 @@ class PostgresCertificationRepository(CertificationRepository):
         return CertificationSubmission(
             id=model.id,
             member_name=model.member_name,
+            user_id=model.user_id,
             certification_type=CertificationTypeEnum(model.certification_type),
             certification_date=model.certification_date,
             channels=[d.channel for d in deliveries],

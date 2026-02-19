@@ -122,6 +122,7 @@ class CertificationSubmission:
     certification_type: CertificationTypeEnum
     certification_date: datetime
     channels: list[ChannelType]
+    user_id: str = ""
     status: SubmissionStatus = SubmissionStatus.SCHEDULED
     photo_url: str | None = None
     linkedin_url: str | None = None
@@ -137,6 +138,7 @@ class CertificationSubmission:
         certification_type: CertificationTypeEnum,
         certification_date: datetime,
         channels: list[ChannelType],
+        user_id: str = "",
         photo_url: str | None = None,
         linkedin_url: str | None = None,
         personal_message: str | None = None,
@@ -147,6 +149,7 @@ class CertificationSubmission:
             certification_type=certification_type,
             certification_date=certification_date,
             channels=channels,
+            user_id=user_id,
             photo_url=photo_url,
             linkedin_url=linkedin_url,
             personal_message=personal_message,

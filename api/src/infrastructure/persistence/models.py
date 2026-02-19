@@ -139,6 +139,7 @@ class CertificationSubmissionModel(Base):
     __tablename__ = "certification_submissions"
 
     id: Mapped[UUID] = mapped_column(PG_UUID(as_uuid=True), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     member_name: Mapped[str] = mapped_column(String(100), nullable=False)
     certification_type: Mapped[str] = mapped_column(String(50), nullable=False)
     certification_date: Mapped[datetime] = mapped_column(DateTime, nullable=False)
