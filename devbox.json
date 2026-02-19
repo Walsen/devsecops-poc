@@ -9,7 +9,8 @@
     "nodejs@latest",
     "gh@latest",
     "just@latest",
-    "docker@latest"
+    "docker@latest",
+    "dig@latest"
   ],
   "shell": {
     "init_hook": [

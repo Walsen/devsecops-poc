@@ -220,6 +220,30 @@ cd testing && just all TARGET_URL=http://localhost:8080
 
 See [testing/README.md](../testing/README.md) and [testing/justfile](../testing/justfile) for complete command reference and setup instructions.
 
+### TLS Security Testing
+
+TLS configuration is validated against the custom domains (`api.ugcbba.click`, `auth.ugcbba.click`):
+
+```bash
+cd testing
+
+# Run TLS-specific tests
+just test-tls
+
+# Run all fast security tests (includes TLS)
+just test-fast
+```
+
+Tests verify certificate validity, TLS 1.0/1.1 rejection, TLS 1.2 acceptance, HTTPS redirect, and HSTS headers. See `testing/test_pentest.py::TestTLSSecurity` for details.
+
+### Test Target URL
+
+By default, tests target `https://api.ugcbba.click` (CloudFront + WAF). Override with:
+
+```bash
+TARGET_URL=https://your-endpoint.example.com just test
+```
+
 ## CI/CD Integration
 
 ### GitHub Actions
@@ -405,6 +429,16 @@ Ensure tests cover:
 - ✅ XSS protection
 - ✅ Rate limiting
 - ✅ Security headers
+- ✅ TLS certificate validity
+- ✅ TLS protocol enforcement (1.2+ only)
+- ✅ HTTPS redirect
+- ✅ HSTS header
+- ✅ CORS policy (origin reflection, preflight, wildcard)
+- ✅ Cookie security (HttpOnly, Secure, SameSite)
+- ✅ CSRF protection (missing/mismatched/tampered tokens)
+- ✅ Error information disclosure
+- ✅ HTTP method restriction
+- ✅ CloudFront origin access
 - ✅ Dependency vulnerabilities
 
 ## Troubleshooting

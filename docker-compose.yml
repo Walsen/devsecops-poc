@@ -116,6 +116,15 @@ services:
       localstack:
         condition: service_healthy
 
+  # Kali Penetration Testing Container
+  kali-pentest:
+    build:
+      context: ./testing
+      dockerfile: Dockerfile.kali
+    network_mode: host
+    profiles:
+      - pentest
+
 volumes:
   postgres_data:
   localstack_data:
