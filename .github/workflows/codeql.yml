@@ -35,10 +35,10 @@ jobs:
           languages: python
           queries: +security-extended,security-and-quality
           # Scan all Python service code
-          paths:
-            - api/src
-            - worker/src
-            - scheduler/src
+          paths: |
+            api/src
+            worker/src
+            scheduler/src
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
@@ -59,8 +59,8 @@ jobs:
         with:
           languages: javascript-typescript
           queries: +security-extended,security-and-quality
-          paths:
-            - web/src
+          paths: |
+            web/src
 
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v3
