@@ -10,8 +10,19 @@ Every request passes through multiple independent security layers before reachin
 
 ### Request Flow
 
-```
-Client → CloudFront (TLS 1.2+) → WAF (OWASP rules) → ALB → Middleware Stack → Application → Database
+```mermaid
+flowchart LR
+    Client -->|TLS 1.2+| CF[CloudFront]
+    CF --> WAF[WAF\nOWASP Rules]
+    WAF --> ALB
+    ALB --> MW[Middleware Stack]
+    MW --> App[Application]
+    App --> DB[(Database)]
+
+    style CF fill:#ff9900,color:#fff
+    style WAF fill:#dd3522,color:#fff
+    style ALB fill:#ff9900,color:#fff
+    style DB fill:#3b48cc,color:#fff
 ```
 
 ### Layer Breakdown
@@ -111,14 +122,25 @@ No request is trusted by default — not even from authenticated users. Every op
 
 JWT validation is strict and multi-layered:
 
-```
-Token arrives → Check algorithm (RS256 only, reject HS256/none)
-             → Fetch JWKS from Cognito (cached with TTL, force-refresh on key rotation)
-             → Verify signature
-             → Validate audience (must match Cognito client ID)
-             → Validate issuer (must match Cognito User Pool URL)
-             → Check expiration
-             → Verify required claims (sub, exp, iat, iss)
+```mermaid
+flowchart TD
+    A[Token arrives] --> B{Algorithm = RS256?}
+    B -->|No| X[❌ Reject]
+    B -->|Yes| C[Fetch JWKS from Cognito\ncached with TTL]
+    C --> D{Signature valid?}
+    D -->|No| X
+    D -->|Yes| E{Audience matches\nCognito client ID?}
+    E -->|No| X
+    E -->|Yes| F{Issuer matches\nCognito User Pool URL?}
+    F -->|No| X
+    F -->|Yes| G{Token expired?}
+    G -->|Yes| X
+    G -->|No| H{Required claims present?\nsub, exp, iat, iss}
+    H -->|No| X
+    H -->|Yes| I[✅ Token verified]
+
+    style X fill:#dd3522,color:#fff
+    style I fill:#1a7f37,color:#fff
 ```
 
 Algorithm confusion attacks are blocked at the header parsing stage, before any signature verification occurs.
@@ -171,11 +193,22 @@ CSRF protection uses the Double Submit Cookie pattern:
 
 Every request gets a correlation ID that flows through all services:
 
-```
-Client → API (generates/extracts X-Request-ID)
-       → Kinesis event (includes correlation_id)
-       → Worker (extracts correlation_id, binds to structlog)
-       → All logs include correlation_id
+```mermaid
+sequenceDiagram
+    participant Client
+    participant API
+    participant Kinesis
+    participant Worker
+
+    Client->>API: Request (X-Request-ID: abc-123)
+    Note over API: Generate correlation_id if missing
+    API->>API: Bind to structlog context
+    API->>Kinesis: Publish event {correlation_id: abc-123}
+    API-->>Client: Response (X-Request-ID: abc-123)
+    Kinesis->>Worker: Consume event
+    Note over Worker: Extract correlation_id from event
+    Worker->>Worker: Bind to structlog context
+    Note over Worker: All logs include correlation_id
 ```
 
 Structured JSON logs with `structlog` include: correlation ID, user ID, service name, operation timing, and error context. No PII is logged.
@@ -184,25 +217,24 @@ Structured JSON logs with `structlog` include: correlation ID, user ID, service 
 
 ### Authentication Flow
 
-```
-                    ┌─────────────┐
-                    │   Cognito    │
-                    │  User Pool   │
-                    │              │
-                    │ - Google     │
-                    │ - GitHub     │
-                    │ - LinkedIn   │
-                    │ - Email/Pass │
-                    └──────┬───────┘
-                           │ JWT (RS256)
-                           ▼
-┌──────────┐    ┌──────────────────┐    ┌─────────────┐
-│  Client  │───▶│   API Gateway    │───▶│  Service    │
-│          │    │                  │    │             │
-│ Bearer   │    │ 1. Verify JWT    │    │ user_id =   │
-│ token or │    │ 2. Extract sub   │    │ jwt.sub     │
-│ Cookie   │    │ 3. Build user    │    │             │
-└──────────┘    └──────────────────┘    └─────────────┘
+```mermaid
+sequenceDiagram
+    participant Client
+    participant Cognito
+    participant API
+    participant Service
+
+    Client->>Cognito: Authenticate (Google/GitHub/LinkedIn/Email)
+    Cognito-->>Client: JWT (RS256)
+    Client->>API: Request + Bearer token or Cookie
+    API->>API: 1. Verify JWT (RS256 only)
+    API->>API: 2. Validate audience + issuer
+    API->>API: 3. Check expiration + required claims
+    API->>API: 4. Extract sub claim
+    API->>Service: user_id = jwt.sub
+    Service->>Service: Filter data by user_id
+    Service-->>API: User-scoped response
+    API-->>Client: Response
 ```
 
 ---
@@ -213,8 +245,20 @@ Security scanning is automated at every stage of the development lifecycle — f
 
 ### Pipeline Security Gates
 
-```
-Code Push → Lint → Unit Tests → Security Scans → CDK Synth → IaC Scan → Build → Deploy → DAST
+```mermaid
+flowchart LR
+    A[Code Push] --> B[Lint]
+    B --> C[Unit Tests]
+    C --> D[Security Scans\nSAST + SCA + Secrets]
+    D --> E[CDK Synth]
+    E --> F[IaC Scan\nCheckov]
+    F --> G[Build\nContainer]
+    G --> H[Deploy]
+    H --> I[DAST\nZAP + Nuclei]
+
+    style D fill:#dd3522,color:#fff
+    style F fill:#dd3522,color:#fff
+    style I fill:#dd3522,color:#fff
 ```
 
 ### Static Analysis (SAST)
