@@ -7,7 +7,7 @@ from sqlalchemy.orm import selectinload
 
 from ....application.ports.outbound import MessageRepository
 from ....domain.entities import Message, MessageStatus
-from ...persistence.models import MessageModel
+from ...persistence.models import MessageModel, _naive_utc
 
 
 class PostgresMessageRepository(MessageRepository):
@@ -23,13 +23,13 @@ class PostgresMessageRepository(MessageRepository):
         if existing:
             existing.content_text = message.content.text
             existing.content_media_url = message.content.media_url
-            existing.scheduled_at = message.scheduled_at
+            existing.scheduled_at = _naive_utc(message.scheduled_at)
             existing.status = message.status.value
-            existing.updated_at = message.updated_at
+            existing.updated_at = _naive_utc(message.updated_at)
             for i, delivery in enumerate(message.deliveries):
                 if i < len(existing.deliveries):
                     existing.deliveries[i].status = delivery.status.value
-                    existing.deliveries[i].delivered_at = delivery.delivered_at
+                    existing.deliveries[i].delivered_at = _naive_utc(delivery.delivered_at)
                     existing.deliveries[i].error = delivery.error
         else:
             model = MessageModel.from_entity(message)

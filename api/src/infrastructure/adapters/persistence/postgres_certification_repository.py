@@ -16,6 +16,7 @@ from ....domain.value_objects.channel_type import ChannelType
 from ...persistence.models import (
     CertificationDeliveryModel,
     CertificationSubmissionModel,
+    _naive_utc,
 )
 
 
@@ -28,13 +29,13 @@ class PostgresCertificationRepository(CertificationRepository):
             id=submission.id,
             member_name=submission.member_name,
             certification_type=submission.certification_type.value,
-            certification_date=submission.certification_date,
+            certification_date=_naive_utc(submission.certification_date),
             photo_url=submission.photo_url,
             linkedin_url=submission.linkedin_url,
             personal_message=submission.personal_message,
             status=submission.status.value,
-            created_at=submission.created_at,
-            updated_at=submission.updated_at,
+            created_at=_naive_utc(submission.created_at),
+            updated_at=_naive_utc(submission.updated_at),
         )
 
         for delivery in submission.deliveries:
@@ -44,7 +45,7 @@ class PostgresCertificationRepository(CertificationRepository):
                 status=delivery.status.value,
                 external_post_id=delivery.external_post_id,
                 error=delivery.error,
-                delivered_at=delivery.delivered_at,
+                delivered_at=_naive_utc(delivery.delivered_at),
             )
             model.deliveries.append(delivery_model)
 
