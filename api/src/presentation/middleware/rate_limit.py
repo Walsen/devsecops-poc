@@ -11,9 +11,9 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 import structlog
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 logger = structlog.get_logger()
 
@@ -100,9 +100,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     identifier=identifier[:20] if len(identifier) > 20 else identifier,
                     burst_count=state.burst_count,
                 )
-                raise HTTPException(
+                return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Too many requests. Please slow down.",
+                    content={"detail": "Too many requests. Please slow down."},
                     headers={"Retry-After": "1"},
                 )
         else:
@@ -119,9 +119,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 identifier=identifier[:20] if len(identifier) > 20 else identifier,
                 minute_count=state.minute_count,
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded. Try again in {retry_after} seconds.",
+                content={"detail": f"Rate limit exceeded. Try again in {retry_after} seconds."},
                 headers={"Retry-After": str(retry_after)},
             )
 
@@ -134,9 +134,11 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 identifier=identifier[:20] if len(identifier) > 20 else identifier,
                 hour_count=state.hour_count,
             )
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Hourly rate limit exceeded. Try again in {retry_after} seconds.",
+                content={
+                    "detail": f"Hourly rate limit exceeded. Try again in {retry_after} seconds."
+                },
                 headers={"Retry-After": str(retry_after)},
             )
 
