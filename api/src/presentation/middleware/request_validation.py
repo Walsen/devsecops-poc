@@ -7,9 +7,9 @@ Security: Implements request size limits and validation to prevent:
 """
 
 import structlog
-from fastapi import HTTPException, Request, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import JSONResponse, Response
 
 logger = structlog.get_logger()
 
@@ -47,9 +47,9 @@ class RequestSizeLimitMiddleware(BaseHTTPMiddleware):
                         path=request.url.path,
                         client=request.client.host if request.client else "unknown",
                     )
-                    raise HTTPException(
+                    return JSONResponse(
                         status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-                        detail=f"Request body too large. Maximum size: {self._max_size} bytes",
+                        content={"detail": f"Request body too large. Max: {self._max_size} bytes"},
                     )
             except ValueError:
                 # Invalid Content-Length header
