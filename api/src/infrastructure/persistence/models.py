@@ -9,6 +9,18 @@ from ...domain.entities import ChannelDelivery, Message, MessageStatus
 from ...domain.value_objects import ChannelType, MessageContent
 
 
+def _naive_utc(dt: datetime | None) -> datetime | None:
+    """Strip timezone info for storage in TIMESTAMP WITHOUT TIME ZONE columns.
+
+    The domain layer correctly uses tz-aware UTC datetimes. The DB columns
+    are currently naive (TIMESTAMP). This adapter helper bridges the gap
+    until migration 003 converts columns to TIMESTAMPTZ.
+    """
+    if dt is None:
+        return None
+    return dt.replace(tzinfo=None)
+
+
 class Base(DeclarativeBase):
     pass
 
@@ -38,11 +50,11 @@ class MessageModel(Base):
             id=message.id,
             content_text=message.content.text,
             content_media_url=message.content.media_url,
-            scheduled_at=message.scheduled_at,
+            scheduled_at=_naive_utc(message.scheduled_at),
             status=message.status.value,
             recipient_id=message.recipient_id,
-            created_at=message.created_at,
-            updated_at=message.updated_at,
+            created_at=_naive_utc(message.created_at),
+            updated_at=_naive_utc(message.updated_at),
         )
         model.deliveries = [
             ChannelDeliveryModel.from_entity(d, message.id) for d in message.deliveries
@@ -88,7 +100,7 @@ class ChannelDeliveryModel(Base):
             message_id=message_id,
             channel=delivery.channel.value,
             status=delivery.status.value,
-            delivered_at=delivery.delivered_at,
+            delivered_at=_naive_utc(delivery.delivered_at),
             error=delivery.error,
         )
 
