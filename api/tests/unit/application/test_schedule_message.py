@@ -41,6 +41,7 @@ class TestScheduleMessageService:
             channels=["whatsapp", "email"],
             scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-123",
+            user_id="auth-user-001",
         )
 
     @pytest.mark.asyncio
@@ -79,6 +80,7 @@ class TestScheduleMessageService:
             channels=["instagram"],
             scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-456",
+            user_id="auth-user-001",
         )
 
         await service.execute(dto)
@@ -93,6 +95,7 @@ class TestScheduleMessageService:
             channels=["invalid_channel"],
             scheduled_at=datetime.now(UTC) + timedelta(hours=1),
             recipient_id="user-123",
+            user_id="auth-user-001",
         )
 
         with pytest.raises(ValueError, match="invalid_channel"):

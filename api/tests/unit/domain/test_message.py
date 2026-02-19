@@ -15,6 +15,7 @@ class TestMessageCreation:
             channels=sample_channels,
             scheduled_at=scheduled_at,
             recipient_id="user-123",
+            user_id="test-user-001",
         )
 
         assert message.id is not None
@@ -31,6 +32,7 @@ class TestMessageCreation:
             channels=sample_channels,
             scheduled_at=datetime.now(UTC),
             recipient_id="user-123",
+            user_id="test-user-001",
         )
 
         assert len(message.deliveries) == 2

@@ -22,6 +22,9 @@ class ScheduleMessageService(ScheduleMessageUseCase):
 
     async def execute(self, dto: CreateMessageDTO) -> UUID:
         """Schedule a message and publish event for async processing."""
+        if not dto.user_id:
+            raise ValueError("user_id is required to schedule a message")
+
         # Create domain entity with validation
         content = MessageContent(text=dto.content, media_url=dto.media_url)
         channels = [ChannelType(ch) for ch in dto.channels]
@@ -31,6 +34,7 @@ class ScheduleMessageService(ScheduleMessageUseCase):
             channels=channels,
             scheduled_at=dto.scheduled_at,
             recipient_id=dto.recipient_id,
+            user_id=dto.user_id,
         )
 
         # Schedule the message

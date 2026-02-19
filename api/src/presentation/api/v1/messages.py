@@ -13,7 +13,7 @@ router = APIRouter(prefix="/messages", tags=["messages"])
 
 @router.post(
     "/",
-    response_model=dict,
+    response_model=dict[str, str],
     status_code=status.HTTP_201_CREATED,
     summary="Schedule a message",
     description="Schedule a message for delivery across multiple channels.",
@@ -22,8 +22,10 @@ async def schedule_message(
     request: CreateMessageDTO,
     user: Annotated[AuthenticatedUser, Depends(require_auth)],
     use_case: ScheduleMessageUseCase = Depends(get_schedule_message_use_case),
-) -> dict:
+) -> dict[str, str]:
     """Schedule a message for async delivery."""
+    # Security: set user_id from authenticated token, never trust client input
+    request.user_id = user.user_id
     message_id = await use_case.execute(request)
     return {"id": str(message_id), "status": "scheduled"}
 
@@ -39,8 +41,8 @@ async def get_message(
     user: Annotated[AuthenticatedUser, Depends(require_auth)],
     use_case: GetMessageUseCase = Depends(get_message_use_case),
 ) -> MessageResponseDTO:
-    """Get message by ID."""
-    message = await use_case.execute(message_id)
+    """Get message by ID, scoped to authenticated user."""
+    message = await use_case.execute(message_id, user_id=user.user_id)
     if not message:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,

@@ -31,6 +31,7 @@ def sample_message(sample_content, sample_channels) -> Message:
         channels=sample_channels,
         scheduled_at=datetime.now(UTC) + timedelta(hours=1),
         recipient_id="user-123",
+        user_id="test-user-001",
     )
 
 

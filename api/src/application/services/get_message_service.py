@@ -11,10 +11,14 @@ class GetMessageService(GetMessageUseCase):
     def __init__(self, repository: MessageRepository) -> None:
         self._repository = repository
 
-    async def execute(self, message_id: UUID) -> MessageResponseDTO | None:
-        """Get message by ID."""
+    async def execute(self, message_id: UUID, user_id: str) -> MessageResponseDTO | None:
+        """Get message by ID, enforcing user ownership (IDOR prevention)."""
         message = await self._repository.get_by_id(message_id)
         if not message:
+            return None
+
+        # Security: verify the authenticated user owns this message
+        if message.user_id != user_id:
             return None
 
         return MessageResponseDTO(
@@ -36,4 +40,5 @@ class GetMessageService(GetMessageUseCase):
                 )
                 for d in message.deliveries
             ],
+            user_id=message.user_id,
         )
