@@ -152,15 +152,13 @@ def fetch_csrf_token(kali_exec_fn, target_url: str) -> str:
 
 
 def get_alb_url() -> str:
-    """Get ALB URL from CloudFormation or fallback to localhost."""
-    try:
-        cf = boto3.client("cloudformation", region_name="us-east-1")
-        response = cf.describe_stacks(StackName="ComputeStack")
-        outputs = response["Stacks"][0]["Outputs"]
-        alb_dns = next(o["OutputValue"] for o in outputs if o["OutputKey"] == "AlbDnsName")
-        return f"http://{alb_dns}"
-    except Exception:
-        return "http://localhost"
+    """Get target URL from environment, custom domain, or CloudFormation fallback."""
+    # Allow override via environment variable
+    if url := os.environ.get("TARGET_URL"):
+        return url.rstrip("/")
+
+    # Default to custom domain (CloudFront + WAF)
+    return "https://api.ugcbba.click"
 
 
 @pytest.fixture(scope="session")

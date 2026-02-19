@@ -667,6 +667,55 @@ jobs:
         run: cdk deploy --all
 ```
 
+## TLS/HTTPS & Custom Domain Security
+
+The platform uses custom domains with enforced TLS to ensure all traffic is encrypted end-to-end.
+
+### Custom Domain Architecture
+
+| Domain | Purpose | Backend |
+|--------|---------|---------|
+| `api.ugcbba.click` | API endpoint | CloudFront → ALB → ECS |
+| `auth.ugcbba.click` | Cognito authentication | Cognito custom domain (CloudFront-backed) |
+| `ugcbba.click` | Frontend | Amplify |
+
+### ACM Certificate
+
+A wildcard ACM certificate covers all subdomains:
+- Subject: `ugcbba.click`
+- SAN: `*.ugcbba.click`
+- Region: `us-east-1` (required for CloudFront)
+- Validation: DNS (Route53 CNAME record)
+
+### TLS Enforcement
+
+| Control | Configuration |
+|---------|---------------|
+| Minimum TLS version | TLS 1.2 (CloudFront Security Policy `TLSv1.2_2021`) |
+| TLS 1.0 / 1.1 | Rejected |
+| HTTP → HTTPS redirect | Enforced at CloudFront |
+| HSTS | `Strict-Transport-Security: max-age=31536000; includeSubDomains` |
+| Certificate auto-renewal | Managed by ACM |
+
+### Automated TLS Testing
+
+TLS security is validated by automated penetration tests in `testing/test_pentest.py::TestTLSSecurity`:
+
+| Test | What it validates |
+|------|-------------------|
+| `test_tls_certificate_valid` | Certificates for `api` and `auth` domains are valid and not expired |
+| `test_https_redirect` | HTTP requests return 301/302/307/308 redirect to HTTPS |
+| `test_tls_1_0_rejected` | TLS 1.0 connections are refused |
+| `test_tls_1_1_rejected` | TLS 1.1 connections are refused |
+| `test_tls_1_2_accepted` | TLS 1.2 connections succeed |
+| `test_hsts_header` | HSTS header present with `max-age >= 31536000` |
+| `test_auth_domain_tls` | Auth domain TLS handshake succeeds |
+
+Run TLS tests:
+```bash
+cd testing && just test-tls
+```
+
 ## References
 
 - [NIST Zero Trust Architecture (SP 800-207)](https://csrc.nist.gov/publications/detail/sp/800-207/final)

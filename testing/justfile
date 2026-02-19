@@ -22,8 +22,13 @@ stop:
 install:
     uv sync
 
+# Verify Kali container is running
+[private]
+check-kali:
+    @docker inspect --format '{{"{{"}}.State.Running{{"}}"}}' {{kali_container}} 2>/dev/null | grep -q true || (echo "Error: Kali container '{{kali_container}}' is not running. Start it with: just start" && exit 1)
+
 # Run interactive pentest agent
-agent:
+agent: check-kali
     uv run python pentest_agent.py
 
 # Run all pytest tests
@@ -73,6 +78,37 @@ test-sqlmap:
 
 test-idor:
     uv run pytest -v test_pentest.py::TestIDORProtection
+
+test-tls:
+    uv run pytest -v test_pentest.py::TestTLSSecurity
+
+# CORS policy validation
+test-cors:
+    uv run pytest -v test_pentest.py::TestCORSPolicy
+
+# Cookie security attributes (HttpOnly, Secure, SameSite)
+test-cookies:
+    uv run pytest -v test_pentest.py::TestCookieSecurity
+
+# End-to-end CSRF protection (needs auth)
+test-csrf:
+    uv run pytest -v test_pentest.py::TestCSRFProtection
+
+# Information disclosure in error responses
+test-error-disclosure:
+    uv run pytest -v test_pentest.py::TestErrorDisclosure
+
+# HTTP method restriction (TRACE, DELETE, PUT)
+test-http-methods:
+    uv run pytest -v test_pentest.py::TestHTTPMethodRestriction
+
+# CloudFront origin access and cache headers
+test-origin-access:
+    uv run pytest -v test_pentest.py::TestCloudFrontOriginAccess
+
+# Run all infrastructure security tests (no auth needed except CSRF)
+test-infra:
+    uv run pytest -v test_pentest.py::TestTLSSecurity test_pentest.py::TestCORSPolicy test_pentest.py::TestCookieSecurity test_pentest.py::TestErrorDisclosure test_pentest.py::TestHTTPMethodRestriction test_pentest.py::TestCloudFrontOriginAccess
 
 # Execute command in Kali container
 [private]

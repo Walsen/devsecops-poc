@@ -42,11 +42,16 @@ build:
 
 # Build Kali testing container
 build-kali:
-    docker build -t devsecops-kali -f testing/Dockerfile.kali testing/
+    docker build -t kali-pentest -f testing/Dockerfile.kali testing/
+
+# Start Kali testing container (builds first if needed)
+start-kali: build-kali
+    -docker rm -f kali-pentest 2>/dev/null
+    docker run -d --name kali-pentest --network host kali-pentest
 
 # Run interactive pentest agent
 agent:
-    uv run --directory testing python pentest_agent.py
+    just --justfile testing/justfile agent
 
 # Run pentest suite (fast tests only)
 pentest:
