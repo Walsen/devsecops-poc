@@ -27,6 +27,7 @@ class SubmitCertificationService(SubmitCertificationUseCase):
             certification_type=dto.certification_type,
             certification_date=dto.certification_date,
             channels=dto.channels,
+            user_id=dto.user_id or "",
             photo_url=str(dto.photo_url) if dto.photo_url else None,
             linkedin_url=str(dto.linkedin_url) if dto.linkedin_url else None,
             personal_message=dto.personal_message,
@@ -71,4 +72,5 @@ class SubmitCertificationService(SubmitCertificationUseCase):
                 for d in submission.deliveries
             ],
             created_at=submission.created_at,
+            user_id=submission.user_id,
         )

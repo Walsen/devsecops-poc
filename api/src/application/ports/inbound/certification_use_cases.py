@@ -20,7 +20,7 @@ class GetCertificationUseCase(ABC):
     """Inbound port for retrieving a certification submission."""
 
     @abstractmethod
-    async def execute(self, submission_id: UUID) -> CertificationResponseDTO | None:
+    async def execute(self, submission_id: UUID, user_id: str) -> CertificationResponseDTO | None:
         pass
 
 

@@ -15,10 +15,15 @@ class GetCertificationService(GetCertificationUseCase):
     def __init__(self, repository: CertificationRepository):
         self._repository = repository
 
-    async def execute(self, submission_id: UUID) -> CertificationResponseDTO | None:
+    async def execute(self, submission_id: UUID, user_id: str) -> CertificationResponseDTO | None:
         submission = await self._repository.get_by_id(submission_id)
         if not submission:
             return None
+
+        # Security: verify the authenticated user owns this submission (IDOR prevention)
+        if submission.user_id != user_id:
+            return None
+
         return self._to_response_dto(submission)
 
     def _to_response_dto(self, submission: CertificationSubmission) -> CertificationResponseDTO:
@@ -42,4 +47,5 @@ class GetCertificationService(GetCertificationUseCase):
                 for d in submission.deliveries
             ],
             created_at=submission.created_at,
+            user_id=submission.user_id,
         )

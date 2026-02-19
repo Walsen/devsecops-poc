@@ -24,6 +24,10 @@ COPY --from=builder /usr/local/bin/uvicorn /usr/local/bin/uvicorn
 # Copy application code
 COPY src/ ./src/
 
+# Copy Alembic migration files (needed for migration task)
+COPY alembic/ ./alembic/
+COPY alembic.ini ./alembic.ini
+
 # Create non-root user
 RUN groupadd -r appuser && useradd -r -g appuser -d /app -s /sbin/nologin appuser
 USER appuser

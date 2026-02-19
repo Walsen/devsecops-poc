@@ -15,7 +15,7 @@ from ....application.ports.inbound import (
     ListCertificationTypesUseCase,
     SubmitCertificationUseCase,
 )
-from ...middleware.auth import AuthenticatedUser, get_current_user, require_auth
+from ...middleware.auth import AuthenticatedUser, require_auth
 from ..dependencies import (
     get_certification_service,
     get_certification_use_case,
@@ -48,7 +48,7 @@ async def submit_certification(
         photo_url=dto.photo_url,
         linkedin_url=dto.linkedin_url,
         personal_message=dto.personal_message,
-        user_id=user.user_id,  # Security: Set from authenticated user
+        user_id=user.user_id,
     )
     return await use_case.execute(dto_with_user)
 
@@ -56,30 +56,19 @@ async def submit_certification(
 @router.get("/{submission_id}", response_model=CertificationResponseDTO)
 async def get_submission(
     submission_id: UUID,
-    user: Annotated[AuthenticatedUser | None, Depends(get_current_user)],
+    user: Annotated[AuthenticatedUser, Depends(require_auth)],
     use_case: GetCertificationUseCase = Depends(get_certification_use_case),
 ) -> CertificationResponseDTO:
     """Get the status of a certification submission.
 
-    Security: Users can only access their own submissions (unless admin).
+    Security: Users can only access their own submissions (IDOR prevention).
     """
-    result = await use_case.execute(submission_id)
+    result = await use_case.execute(submission_id, user_id=user.user_id)
     if not result:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Submission not found",
         )
-
-    # Security: Verify user owns this resource (IDOR prevention)
-    if user:
-        is_admin = user.groups and "admin" in user.groups
-        if not is_admin and result.user_id and result.user_id != user.user_id:
-            # Don't reveal that the resource exists - return 404
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail="Submission not found",
-            )
-
     return result
 
 

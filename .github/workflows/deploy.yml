@@ -701,12 +701,66 @@ jobs:
       - name: Run migrations
         if: steps.network.outputs.skip != 'true'
         run: |
-          aws ecs run-task \
-            --cluster secure-api-cluster \
+          # Discover the ECS cluster dynamically
+          CLUSTER=$(aws ecs list-clusters \
+            --query "clusterArns[?contains(@, 'ComputeStack')]" \
+            --output text 2>/dev/null || true)
+
+          if [ -z "$CLUSTER" ]; then
+            echo "No ECS cluster found, skipping migrations"
+            exit 0
+          fi
+
+          # Launch the migration ECS task
+          TASK_OUTPUT=$(aws ecs run-task \
+            --cluster "$CLUSTER" \
             --task-definition api-migration \
             --launch-type FARGATE \
             --network-configuration "awsvpcConfiguration={subnets=[${{ steps.network.outputs.subnets }}],securityGroups=[${{ steps.network.outputs.security_group }}],assignPublicIp=DISABLED}" \
-            --no-cli-pager || echo "Migration task not configured yet"
+            --no-cli-pager \
+            --output json 2>&1) || { echo "Migration task not configured yet"; exit 0; }
+
+          # Extract task ARN
+          TASK_ARN=$(echo "$TASK_OUTPUT" | jq -r '.tasks[0].taskArn // empty')
+          if [ -z "$TASK_ARN" ]; then
+            FAILURES=$(echo "$TASK_OUTPUT" | jq -r '.failures[]?.reason // "unknown"')
+            echo "Failed to start migration task: $FAILURES"
+            exit 1
+          fi
+
+          echo "Migration task started: $TASK_ARN"
+
+          # Wait for the task to complete
+          echo "Waiting for migration task to finish..."
+          aws ecs wait tasks-stopped \
+            --cluster "$CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --no-cli-pager
+
+          # Check exit code
+          EXIT_CODE=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].containers[0].exitCode" \
+            --output text \
+            --no-cli-pager)
+
+          STOP_REASON=$(aws ecs describe-tasks \
+            --cluster "$CLUSTER" \
+            --tasks "$TASK_ARN" \
+            --query "tasks[0].stoppedReason" \
+            --output text \
+            --no-cli-pager)
+
+          echo "Migration task exit code: $EXIT_CODE"
+          echo "Stop reason: $STOP_REASON"
+
+          if [ "$EXIT_CODE" != "0" ]; then
+            echo "Migration failed with exit code $EXIT_CODE"
+            exit 1
+          fi
+
+          echo "Migration completed successfully"
 
   # ============================================================
   # Deploy EdgeStack (CloudFront + WAF) - manual trigger only
