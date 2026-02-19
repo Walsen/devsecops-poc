@@ -643,7 +643,7 @@ jobs:
   migrate:
     name: Run Migrations
     runs-on: ubuntu-latest
-    needs: [setup, changes, deploy-services]
+    needs: [setup, changes, deploy-cdk, deploy-services]
     if: |
       always()
       && needs.setup.outputs.infra_type == 'containers'
