@@ -318,6 +318,10 @@ mindmap
 - Latency is critical
 - Content is pre-formatted
 
+## Other Agents
+
+- [Security Testing Agent](security-testing-agent.md) — AI-powered penetration testing assistant using the same Strands SDK, scoped to running, debugging, and fixing security tests.
+
 ## References
 
 - [Strands Agents Documentation](https://strandsagents.com)

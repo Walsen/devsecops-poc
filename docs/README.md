@@ -133,6 +133,7 @@ See [Dual-Mode Deployment Guide](dual-mode-deployment.md) for the full migration
 - [Golden Thread Tracing](golden-thread-tracing.md) - Distributed security tracing exercise (attack simulation)
 - [Penetration Testing](penetration-testing.md) - Manual security testing guide and checklist
 - [Automated Penetration Testing](automated-penetration-testing.md) - Automated security testing with Docker
+- [Security Testing Agent](security-testing-agent.md) - AI-powered penetration testing assistant
 - [Service Discovery](service-discovery.md) - Cloud Map and inter-service communication
 - [AI Agents](ai-agents.md) - Using Bedrock Agents for intelligent posting
 
